@@ -242,16 +242,24 @@ explain what a command will do; the user runs it.
 
 ## Accuracy and versions
 
-- The summaries and the bundled docs describe **AI-DLC 2.11.2** (tag
-  `v2.11.2`, the latest stable release when this skill was written). To
-  confirm the bundled version, read the `Tag:` line in
-  `references/aidlc-workflows/SOURCE.md`.
-- When the user has AI-DLC installed, compare `aidlc version` with the
-  bundled version. If theirs is newer, say once that details may have changed
-  and check `references/aidlc-workflows/CHANGELOG.md`. Trust `aidlc doctor`
-  and `/aidlc --help` on their machine over the bundled docs. To refresh the
-  bundle, a maintainer runs `scripts/update-aidlc-docs.sh`. Don't run it in a
-  user session.
+- Two versions matter:
+  - The **summaries** (`references/*.md` other than the bundled docs) were
+    written for **AI-DLC 2.11.2**.
+  - The **full bundled docs** are at the `Tag:` line in
+    `references/aidlc-workflows/SOURCE.md`. That can be newer, because users
+    can refresh the docs themselves.
+
+  When the full docs are newer than 2.11.2, the summaries may be out of date:
+  for anything a summary states (numbers, defaults, commands), confirm it in
+  the full docs, and where they differ, trust the full docs.
+- When the user has AI-DLC installed, compare `aidlc version` with the bundled
+  docs' tag. If theirs is newer, say once that details may have changed, and
+  check `references/aidlc-workflows/CHANGELOG.md`. Trust `aidlc doctor` and
+  `/aidlc --help` on their machine over the bundled docs. Offer the refresh
+  command and let the user run it; don't run it yourself:
+  `python "<this skill's base directory>/scripts/update-aidlc-docs.py"`
+  (`py` instead of `python` on Windows). It needs Python 3 and network access,
+  takes effect in the next new session, and `--check` only compares versions.
 - If neither the summaries nor the bundled docs answer a question, say so
   instead of guessing.
 - Never promise behavior AI-DLC doesn't guarantee. Generative AI can make

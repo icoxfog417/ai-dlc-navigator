@@ -16,5 +16,7 @@
 /.opencode/
 /.agents/
 
-# Never commit an update in progress (scripts/update-aidlc-docs.sh)
+# Never commit an update in progress (scripts/update-aidlc-docs.py)
 skills/*/references/.update.*
+__pycache__/
+*.pyc

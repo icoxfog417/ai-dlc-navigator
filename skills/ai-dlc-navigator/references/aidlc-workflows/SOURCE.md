@@ -1,7 +1,7 @@
 # Source of this snapshot
 
 Plain-file snapshot of the AI-DLC repository, bundled with the ai-dlc-navigator skill.
-Do not edit by hand. Refresh with `scripts/update-aidlc-docs.sh` from the skill folder.
+Do not edit by hand. Refresh with `python scripts/update-aidlc-docs.py` from the skill folder.
 
 - Repository: https://github.com/awslabs/aidlc-workflows
 - Tag: `v2.11.2`

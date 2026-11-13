@@ -8,86 +8,91 @@ Cycle) in their own language: Japanese, English, or any other. It explains:
 2. **How to use it**: install, set up a project, run the first `/aidlc`
    workflow, answer approval gates, and get unstuck
 3. **Which settings to choose**: tool, model and effort, workflow profile,
-   depth, Guard Policy, and more, for each situation
+   depth, Guard Policy, and more, for your situation
 
-The skill bundles a snapshot of the AI-DLC documentation at a stable release
-(`skills/ai-dlc-navigator/references/aidlc-workflows/`, see its `SOURCE.md`), so
-it works offline and nobody needs to clone AI-DLC.
+It bundles a snapshot of the AI-DLC documentation, so it works without cloning
+AI-DLC. To develop the skill itself, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Install
 
-Requires the [GitHub CLI](https://cli.github.com/) with `gh skill` (preview).
+Requires the [GitHub CLI](https://cli.github.com/) 2.100 or later (`gh skill`
+is in preview).
 
 ```bash
 gh skill install icoxfog417/ai-dlc-navigator ai-dlc-navigator --agent claude-code --scope user
 ```
 
-Then start a new Claude Code session and ask, for example, 「AI-DLC とは？」 or
-"How do I set up AI-DLC?".
+This puts the skill in `~/.claude/skills/ai-dlc-navigator/`, so it's available
+in every project. To stay on one version, add `--pin v0.1.0`.
 
-- **User scope** (`--scope user`) makes it available in every project.
-  Project scope (`.claude/skills/` of one project) also works: `aidlc config`
-  keeps it on setup and refresh (checked with AI-DLC 2.11.2). But a hand-made
-  reset that deletes the whole `.claude/` folder deletes the skill too. To take
-  AI-DLC out of a project, use its manifest-based removal instead, which keeps
-  files it didn't install.
-- Stay on one version: add `--pin v0.1.0`. Update: `gh skill update ai-dlc-navigator`.
+## Use
 
-## Develop and use it at the same time
+Start a **new** Claude Code session (skills load when a session starts), then
+either ask in your own words or call the skill by name:
 
-The source of truth is `skills/ai-dlc-navigator/`, which is **outside**
-`.claude/`. A reset of AI-DLC's files can't take it with it, and AI-DLC's guard
-hooks, which refuse agent commands on `.claude/` paths, don't get in the way of
-editing it. Claude Code still loads skills only from a `.claude/skills/` folder,
-so link the source into one. **Pick one** of these, not both, so the same skill
-isn't loaded twice:
-
-```bash
-# A) This project only (what this repo uses; relative, so it survives moving the repo)
-mkdir -p .claude/skills && ln -s ../../skills/ai-dlc-navigator .claude/skills/ai-dlc-navigator
-
-# B) User level: available in every project
-ln -s "$PWD/skills/ai-dlc-navigator" ~/.claude/skills/ai-dlc-navigator
+```text
+AI-DLC とは？初めてなので、何から始めればいいですか？
+/ai-dlc-navigator How do I set up AI-DLC for my team?
 ```
 
-Run A once after cloning. `.claude/` is git-ignored (`gh skill publish` warns
-when `.claude/skills/` is committed), so the link isn't in the repo. Why not
-keep the skill itself in `.claude/skills/`? `gh skill publish` doesn't look in
-hidden folders, so it would find nothing to release.
+The navigator replies in the language you write in. It can explain the
+concepts and the reasons behind them, walk you through installing AI-DLC and
+your first `/aidlc` run, and recommend settings for your situation.
 
-AI-DLC keeps either link. `aidlc config` (setup and refresh) removes only its
-own unchanged files that a newer release dropped, `aidlc uninstall` leaves
-project files alone, and AI-DLC has no command that removes it from a project.
-Don't copy the folder instead of linking: a copy goes stale as soon as you
-edit the source.
+## Update
 
-- Edit files under `skills/ai-dlc-navigator/`. Changes apply from the next new
-  Claude Code session.
-- You can also run AI-DLC itself in this folder (`aidlc config`, then `/aidlc`)
-  to try the navigator end to end. Its files (`.claude/`, `aidlc/`, ...) are
-  git-ignored.
-- On the development machine, **don't** run `gh skill install` or `gh skill update`
-  for this skill. Through the symlink, they would overwrite the source and add
-  install metadata to `SKILL.md`. If that metadata ever gets committed,
-  `gh skill publish --fix` strips it.
-
-## Release
+**The skill** (new summaries, fixes, and newer bundled docs, when released):
 
 ```bash
-gh skill publish --dry-run          # validate against the Agent Skills spec
-gh skill publish --tag v0.1.0       # create a GitHub release that users install
+gh skill update ai-dlc-navigator
 ```
 
-## Update the bundled AI-DLC docs
+If you installed with `--pin`, the update skips it. Add `--unpin` to follow
+new releases again.
+
+**Only the bundled AI-DLC docs**, when AI-DLC has released a newer version than
+the one bundled (Python 3, standard library only):
 
 ```bash
-skills/ai-dlc-navigator/scripts/update-aidlc-docs.sh [vX.Y.Z]   # default: newest stable tag
+# macOS / Linux
+python3 ~/.claude/skills/ai-dlc-navigator/scripts/update-aidlc-docs.py --check   # compare versions
+python3 ~/.claude/skills/ai-dlc-navigator/scripts/update-aidlc-docs.py           # update to AI-DLC's latest release
 ```
 
-It rebuilds the snapshot beside the old one and swaps it in only when the
-rebuild succeeds. Afterwards, check the summaries in
-`skills/ai-dlc-navigator/references/*.md` and the version line in `SKILL.md`
-against the new `CHANGELOG.md`.
+```powershell
+# Windows
+py "$env:USERPROFILE\.claude\skills\ai-dlc-navigator\scripts\update-aidlc-docs.py" --check
+py "$env:USERPROFILE\.claude\skills\ai-dlc-navigator\scripts\update-aidlc-docs.py"
+```
+
+It downloads the release that AI-DLC's own installer would install, and replaces
+the bundled docs only when the download succeeds. Start a new session afterwards.
+A later `gh skill update` brings the docs back to the release's copy.
+
+## Using it next to AI-DLC
+
+The navigator works alongside AI-DLC's own commands and doesn't change them.
+
+- **Names don't overlap.** AI-DLC's commands and skills are `/aidlc` and
+  `aidlc-*`. This skill is `ai-dlc-navigator`, outside that namespace.
+- **The navigator explains; you decide and run.** It never runs `/aidlc`
+  stages, answers approval gates for you, or edits AI-DLC's records under
+  `aidlc/`. It runs only read-only checks (`aidlc version`, `aidlc doctor`,
+  `aidlc config --dry-run`) and shows any other command for you to run.
+- **Start a new conversation after `aidlc config`.** `/aidlc` and AI-DLC's
+  hooks load when a session starts. The navigator is available in the new
+  conversation too, so you can ask about a gate while you work.
+- **User scope is the safest place.** A project-scope install (the project's
+  `.claude/skills/`) also works: AI-DLC's `aidlc config` keeps it on setup and
+  refresh (checked with AI-DLC 2.11.2). But **don't delete the whole `.claude/`
+  folder** to reset AI-DLC, because that deletes the skill too. To take AI-DLC
+  out of a project, follow its manifest-based removal ("Remove AI-DLC from a
+  Project" in AI-DLC's install guide), which keeps files AI-DLC didn't install.
+- **Version differences.** If your AI-DLC is newer than the bundled docs, the
+  navigator says so and points you to the docs update above. `aidlc doctor` and
+  `/aidlc --help` on your machine are always the final word.
+- Generative AI can make mistakes. Review what the navigator and AI-DLC
+  produce, and the costs, before acting on them.
 
 ## License
 

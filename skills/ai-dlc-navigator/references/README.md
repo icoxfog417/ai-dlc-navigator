@@ -36,7 +36,8 @@ Most useful pages in the snapshot:
 | Methodology spec | `aidlc-workflows/assets/AI-DLC-Workflows-2.0-Specification.pdf` |
 | What changed per release | `aidlc-workflows/CHANGELOG.md` |
 
-To refresh the snapshot, run `scripts/update-aidlc-docs.sh [vX.Y.Z]` from the skill
-folder (maintainers only; it needs network access and `git`). It fetches the
-newest stable tag (or the one named), rebuilds the snapshot beside the old one,
-and swaps it in only when the build succeeds.
+To refresh the snapshot, run `python scripts/update-aidlc-docs.py [vX.Y.Z]` from
+the skill folder (`py` on Windows; Python 3, standard library only, network
+access). It downloads AI-DLC's latest release (or the tag named), rebuilds the
+snapshot beside the old one, and swaps it in only when the rebuild succeeds.
+`--check` only compares the bundled and latest versions.
