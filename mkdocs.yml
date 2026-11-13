@@ -14,7 +14,7 @@ strict: true
 
 nav:
   - ホーム: index.md
-  - チュートリアル: tutorial.md
+  - "AI-DLC 実践: チュートリアル": tutorial.md
 
 theme:
   name: material
@@ -39,7 +39,7 @@ theme:
         name: ライトモードに切り替え
 
 markdown_extensions:
-  - tools.site_markdown # trial notes out, GitHub alerts to admonitions
+  - tools.site_markdown # trial notes out, GitHub alerts to admonitions; needs `python -m zensical`
   - admonition
   - attr_list
   - tables
