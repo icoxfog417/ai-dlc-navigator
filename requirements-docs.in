@@ -1,4 +1,3 @@
 # Site build only (not shipped with the skill). Regenerate requirements-docs.txt:
 #   pip-compile --generate-hashes --strip-extras requirements-docs.in
-mkdocs==1.6.1
-mkdocs-material==9.8.1
+zensical==0.1.1
