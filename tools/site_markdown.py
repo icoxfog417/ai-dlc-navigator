@@ -1,4 +1,8 @@
-"""MkDocs hooks for the GitHub Pages site (not shipped with the skill).
+"""Python-Markdown extension for the GitHub Pages site (not shipped with the skill).
+
+Listed under markdown_extensions in mkdocs.yml as `tools.site_markdown`. It is an
+extension rather than an MkDocs hook because Zensical, which builds the site,
+does not run MkDocs hooks; Python-Markdown extensions work in both.
 
 The pages in docs/ are written to read well on GitHub too, so the site build
 rewrites two things there:
@@ -6,11 +10,14 @@ rewrites two things there:
 - Trial-run notes between <!-- trial --> and <!-- /trial --> are for the
   people running the tutorial's trials. They stay in the Markdown and are
   left out of the site.
-- GitHub alerts (> [!NOTE], > [!TIP], ...) become Material admonitions.
-  A first body line in bold (> **Title**) becomes the admonition's title.
+- GitHub alerts (> [!NOTE], > [!TIP], ...) become admonitions. A first body
+  line in bold (> **Title**) becomes the admonition's title.
 """
 
 import re
+
+from markdown.extensions import Extension
+from markdown.preprocessors import Preprocessor
 
 TRIAL = re.compile(r"^[ \t]*<!-- trial -->.*?<!-- /trial -->[ \t]*\n?", re.S | re.M)
 ALERT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$")
@@ -60,5 +67,16 @@ def alerts_to_admonitions(markdown: str) -> str:
     return "\n".join(out)
 
 
-def on_page_markdown(markdown, **kwargs):
-    return alerts_to_admonitions(strip_trial_notes(markdown))
+class _SitePreprocessor(Preprocessor):
+    def run(self, lines):
+        return alerts_to_admonitions(strip_trial_notes("\n".join(lines))).split("\n")
+
+
+class SiteMarkdownExtension(Extension):
+    def extendMarkdown(self, md):
+        # Before html_block (20), which would stash the <!-- trial --> comments.
+        md.preprocessors.register(_SitePreprocessor(md), "site_markdown", 28)
+
+
+def makeExtension(**kwargs):
+    return SiteMarkdownExtension(**kwargs)

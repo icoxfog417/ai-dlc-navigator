@@ -16,7 +16,7 @@ How to edit, test, and publish the skill. To install and use it, see
 ├── tools/docs-refresh-pr-body.py     ← PR text for the weekly docs refresh (not shipped)
 ├── .github/workflows/refresh-aidlc-docs.yml ← weekly: new AI-DLC release → docs refresh PR
 ├── docs/                         ← GitHub Pages site source (Japanese tutorial + intro; not shipped)
-├── mkdocs.yml, requirements-docs.{in,txt}, tools/mkdocs_hooks.py ← site build (not shipped)
+├── mkdocs.yml, requirements-docs.{in,txt}, tools/site_markdown.py ← site build (not shipped)
 ├── .github/workflows/pages.yml   ← builds the site on PRs; publishes it from main
 └── .claude/skills/ai-dlc-navigator   → ../../skills/ai-dlc-navigator   (local link, git-ignored)
 ```
@@ -123,28 +123,31 @@ there is a ruleset.
 ## Site
 
 `docs/` is the source of <https://icoxfog417.github.io/ai-dlc-navigator/>,
-built with MkDocs Material. Pages are written to read well on GitHub too:
+built with [Zensical](https://zensical.org/) (the successor of Material for
+MkDocs), which reads `mkdocs.yml`. Pages are written to read well on GitHub too:
 
 - Trial-run notes go between `<!-- trial -->` and `<!-- /trial -->` (each on
   its own line). They stay in the Markdown and are left out of the site.
 - Use GitHub alerts (`> [!NOTE]`, `> [!TIP]`, `> [!WARNING]`). A bold first
   line (`> **Title**`) becomes the box title on the site.
 
-Both are done by `tools/mkdocs_hooks.py`. Preview locally:
+Both are done by `tools/site_markdown.py`, a Python-Markdown extension. It is
+not an MkDocs hook on purpose: Zensical ignores `hooks:` without a warning, and
+the trial notes would be published. Preview locally from the repo root:
 
 ```bash
 python3 -m venv .venv-docs
 .venv-docs/bin/pip install --require-hashes --no-deps -r requirements-docs.txt
-NO_MKDOCS_2_WARNING=1 .venv-docs/bin/mkdocs serve   # http://127.0.0.1:8000
+.venv-docs/bin/zensical serve   # http://localhost:8000
 ```
 
 `.github/workflows/pages.yml` builds with `--strict` on every pull request that
-touches the site and publishes from `main` (Settings → Pages → Source:
-**GitHub Actions**). To change MkDocs versions, edit `requirements-docs.in` and
-regenerate `requirements-docs.txt` with
+touches the site, fails if a trial marker reaches the built HTML, and publishes
+from `main` (Settings → Pages → Source: **GitHub Actions**). To change the
+Zensical version, edit `requirements-docs.in` and regenerate
+`requirements-docs.txt` with
 `pip-compile --generate-hashes --strip-extras requirements-docs.in`.
-Material for MkDocs reaches end of life on 2027-05-05; its successor Zensical
-reads `mkdocs.yml`.
+Zensical is still 0.x: read its release notes before bumping it.
 
 ## Update the bundled AI-DLC docs
 

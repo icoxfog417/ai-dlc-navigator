@@ -1,5 +1,6 @@
 # GitHub Pages site: the tutorial plus a short introduction to the skill.
-# Build locally: see DEVELOPMENT.md, "Site". Published by .github/workflows/pages.yml.
+# Built with Zensical, which reads this file (MkDocs-compatible). See DEVELOPMENT.md,
+# "Site". Published by .github/workflows/pages.yml.
 site_name: ai-dlc-navigator
 site_description: AI-DLC を初めて使う人のための Agent Skill とチュートリアル
 site_url: https://icoxfog417.github.io/ai-dlc-navigator/
@@ -17,7 +18,7 @@ nav:
 
 theme:
   name: material
-  language: ja
+  language: ja # also the search language
   features:
     - content.code.copy
     - navigation.top
@@ -37,14 +38,8 @@ theme:
         icon: material/weather-sunny
         name: ライトモードに切り替え
 
-plugins:
-  - search:
-      lang: ja
-
-hooks:
-  - tools/mkdocs_hooks.py
-
 markdown_extensions:
+  - tools.site_markdown # trial notes out, GitHub alerts to admonitions
   - admonition
   - attr_list
   - tables
