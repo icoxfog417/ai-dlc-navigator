@@ -14,7 +14,7 @@ strict: true
 
 nav:
   - ホーム: index.md
-  - チュートリアル: tutorial.md
+  - "AI-DLC 実践: チュートリアル": tutorial.md
 
 theme:
   name: material
