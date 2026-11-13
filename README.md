@@ -13,6 +13,10 @@ Cycle) in their own language: Japanese, English, or any other. It explains:
 It bundles a snapshot of the AI-DLC documentation, so it works without cloning
 AI-DLC. To develop the skill itself, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
+A hands-on tutorial (Japanese, 45 minutes) walks through how AI-DLC turns a
+person's decision into a learned rule and then a check:
+<https://icoxfog417.github.io/ai-dlc-navigator/>
+
 ## Install
 
 Requires the [GitHub CLI](https://cli.github.com/) 2.100 or later (`gh skill`
