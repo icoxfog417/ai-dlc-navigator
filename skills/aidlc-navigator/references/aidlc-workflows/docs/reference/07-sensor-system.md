@@ -1,0 +1,600 @@
+# Sensor System
+
+Concrete `dist/claude/` paths in this chapter refer to the ignored local
+projection materialized by `bun scripts/package.ts`; installed projects use the
+same relative paths under `.claude/`.
+
+> Audience: Tier 2/3 (team adopter, framework contributor).
+
+This chapter is the **schema reference** for AI-DLC sensor manifests —
+the deterministic checks that fire on writes to a stage's outputs.
+Sensors are the feedback half of the control loop; rules are the
+feedforward half (see [Rule System](08-rule-system.md), the next
+chapter). The [Plane Architecture](02-plane-architecture.md) chapter
+frames both as control-plane inputs that the compile resolves into each
+stage node.
+
+This chapter covers the manifest *file format* — what a sensor manifest
+contains, how stages import sensors, and how the six shipped manifests
+are configured. For the user-facing view of how sensors fire during a
+workflow, see [Rules and the Learning Loop](../guide/09-rules-and-the-learning-loop.md)
+in the User Guide.
+
+> **Path convention.** `<record>/` below = the active intent's record dir,
+> `aidlc/spaces/<space>/intents/<YYMMDD>-<label>/` (a compact UTC date prefix
+> plus a short kebab-case label, so record dirs sort chronologically; the
+> canonical id is the UUIDv7 stored in the `intents.json` registry row). Note the two document-shape
+> sensors' `matches` glob in the shipped manifests still carries the legacy
+> artifact-tree path (quoted verbatim below where the schema is documented).
+
+For runtime behaviour see [Stage Protocol](04-stage-protocol.md). The
+file-format parallel for stage definitions lives at
+[Stage Definition](15-stage-definition.md).
+
+---
+
+## Manifest location and filename
+
+Sensor manifests live at:
+
+```
+dist/claude/.claude/sensors/aidlc-<id>.md
+```
+
+Every framework-shipped manifest carries the `aidlc-` filename prefix
+(matching the broader framework-file convention). The frontmatter `id:`
+field MUST equal the filename stem with the `aidlc-` prefix removed and
+the `.md` suffix stripped:
+
+| Filename | Required `id:` |
+|---|---|
+| `aidlc-required-sections.md` | `required-sections` |
+| `aidlc-linter.md` | `linter` |
+
+The filename-to-id rule is enforced by `tests/unit/t86-sensor-manifest-schema.test.ts`.
+The `aidlc-` prefix is **mandatory for all sensors, including custom
+user-shipped ones**: the compile resolver discovers manifests with
+`SENSOR_FILE_REGEX = /^aidlc-([a-z][a-z0-9-]*)\.md$/` (`loadSensors` in
+`aidlc-graph.ts`), so any file without the prefix is silently skipped and never
+binds to a stage. Name a custom sensor `aidlc-<id>.md` and set `id: <id>`.
+
+---
+
+## Sensor Manifest Schema
+
+Every manifest is a Markdown file with YAML frontmatter and a body. The
+frontmatter is the structured contract — a pure capability descriptor —
+and the body is human prose documenting the check. Manifests describe
+*what the sensor is*, not which stages use it; the relationship lives
+on the stage side via the stage's frontmatter `sensors:` field (see
+[How stages import sensors](#how-stages-import-sensors) below).
+
+The shipped `required-sections` manifest, as a native install has it:
+
+```markdown
+---
+id: required-sections
+kind: deterministic
+command: aidlc engine sensor-required-sections
+default_severity: advisory
+fire_on: gate
+description: Checks at the gate that stage output contains the required H2 headings
+category: document-shape
+matches: "**/{aidlc-docs,intents,codekb}/**"
+input_schema:
+  output_path: string
+  stage_slug: string
+output_schema:
+  pass: boolean
+  h2_count: integer
+  headings: string[]
+  findings_count: integer
+  edge_block: string
+  template: string
+  template_expected: string[]
+  template_missing: string[]
+  config_warning: string
+  message: string
+timeout_seconds: 300
+---
+
+# required-sections sensor
+
+With no template for the output, no heading is required: the stage's prose
+shapes the file, so the check passes and still reports the output's `##`
+headings. When a template applies (below), its `##` headings are required.
+```
+
+Keep comments off the field lines: the parser reads a `# ...` after a
+top-level field's value as part of the value, so `id: demo-check   # required` makes the id
+`demo-check   # required` and the manifest fails to load. The engine shows
+how it reads a manifest, here the shipped `linter`:
+
+```text
+$ aidlc engine sensor describe linter
+id: linter
+kind: deterministic
+command: aidlc engine sensor-linter
+default_severity: advisory
+description: Wraps the project's configured linter (eslint by default for v0.5.0); fires on TS/JS code outputs
+category: code-quality
+matches: **/*.{ts,js}
+timeout_seconds: 1200
+path: .claude/sensors/aidlc-linter.md
+```
+
+| Field | Required | Type | Notes |
+|---|---|---|---|
+| `id` | yes | kebab-case string | Equals filename stem minus `aidlc-` prefix; cross-referenced from rule files' `pairing:` field (see [Rule System](08-rule-system.md)). |
+| `kind` | yes | enum | Only `deterministic` is accepted today; any other value is refused at parse time. See [`kind` enum](#kind-enum) below. |
+| `command` | yes | string | Canonical invocation prefix. Shipped sensors use a native delegate such as `aidlc engine sensor-required-sections`; a custom sensor names its TypeScript worker, such as `bun .claude/tools/aidlc-sensor-<id>.ts`. The dispatcher takes the `.ts` file name (or the `sensor-<id>` delegate) and runs that file from the installed tools folder; on a native install the file must be named `aidlc-sensor-<id>.ts` and `export function main(argv)`. The sensor dispatcher appends `--stage <slug>` plus the path flag `input_schema` selects: `--file-path <path>` when it declares `file_path`, otherwise `--output-path <path>`. See [`command:` invocation contract](#command-invocation-contract). |
+| `default_severity` | yes | enum | `advisory` or `blocking`. Blocking is enforced for `fire_on: gate`; write-fired blocking declarations remain advisory in this release. |
+| `description` | yes | string | One-line human description. |
+| `category` | optional | string | Free-form descriptive label (the shipped manifests use `document-provenance`, `document-shape`, and `code-quality`; not a closed enum). |
+| `fire_on` | optional | enum | `write` or `gate`; defaults to `write`. |
+| `matches` | optional | glob string | Capability filter consumed at dispatch. See [`matches` filter](#matches-filter) below. |
+| `input_schema` | optional | object | The invocation contract, as a block mapping or a one-line flow mapping. The dispatcher reads its keys to pick the path flag: declaring `file_path` selects `--file-path`, any other keys select `--output-path`, and a manifest that declares no keys keeps the shipped routing (`--file-path` only for `linter` and `type-check`). The values are type hints nothing reads yet; future LLM dispatch will use them as a templating contract. The extra flags some shipped sensors receive (`--consumes`, `--deliverables`, the template flags) are still chosen by sensor id, not by these keys. |
+| `output_schema` | optional | object | Advisory today; future LLM dispatch will use it as a parsing contract. |
+| `timeout_seconds` | optional | int | Per-fire wall-clock cap; omitted values use 1,200 seconds. |
+
+---
+
+## `kind` enum
+
+The `kind` field declares the dispatch mechanism. The schema accepts
+exactly one value today:
+
+- `deterministic` - the dispatcher runs the manifest's worker with the
+  per-fire flags. The worker prints one JSON line on stdout with a boolean
+  `pass` (plus `findings` and `findings_count`, the number the audit row
+  records) and exits 0 whether the check passes or fails; the dispatcher
+  writes the failure detail file. Exit 127 is recorded as a pass noted
+  `tool-unavailable`; a worker that cannot start, any other non-zero exit,
+  or output with no boolean `pass` is recorded as `SENSOR_COULD_NOT_RUN`
+  with a `script-error` note, never as a pass (see
+  [`default_severity`](#default_severity) for what the gate says and what a
+  blocking gate binding does with it).
+
+Any other `kind`, `llm` included, is refused at parse time ("other kinds
+reserved for future releases").
+
+Unknown values for `kind` (anything other than `deterministic`) are
+rejected at parse time. Forward-compat applies to *unknown keys*
+(see [Forward-compat policy](#forward-compat-policy)) — not to unknown
+values for known keys.
+
+---
+
+## How stages import sensors
+
+Pull authoring: each stage's frontmatter declares the sensors it uses.
+The compile resolver looks each declared id up in the manifest registry
+and bakes a `sensors_applicable` array onto the stage's compiled graph
+node. Authoring direction is locality-of-reference — open a stage file
+and you see exactly which checks fire when the stage runs.
+
+```yaml
+# dist/claude/.claude/aidlc-common/stages/construction/ci-pipeline.md
+---
+slug: ci-pipeline
+phase: construction
+# ...
+requires_stage: [...]
+sensors:
+  - required-sections
+  - upstream-coverage
+  - linter
+  - type-check
+inputs: ...
+outputs: ...
+---
+```
+
+`sensors:` is a list of bare ids — the ids match each manifest's
+frontmatter `id:` field, which (per the filename↔id contract) equals the
+filename stem minus the `aidlc-` prefix. The compile resolver:
+
+1. Walks `dist/claude/.claude/sensors/`, parses every
+   `aidlc-<id>.md` manifest.
+2. Indexes manifests by id for O(1) lookup at resolution time.
+3. For each stage, looks each declared import id up; throws on unknown
+   (loud failure at compile, not silent at fire time).
+4. Copies `fire_on`, `default_severity`, `category`, and `matches` into the
+   resolved `sensors_applicable[]` entry.
+5. Emits the per-stage resolved array on the canonical
+   `data/stage-graph.json` (FIELD_ORDER pinned: after `rules_in_context`).
+
+The runtime PostToolUse hook, `gate-start`, and `revise` read
+`sensors_applicable` off the graph node to decide what fires; none re-opens
+the manifest for that. The dispatcher re-reads the manifest at every fire only
+for `command`, `input_schema`, `timeout_seconds` and its own `matches` re-check
+against the path. Everything the graph copied (`fire_on`, `default_severity`,
+`category`, the hook's `matches` filter) and a new import wait for the next
+compile. On a native install the six shipped sensors run their bundled worker
+by id, so editing their `command` changes nothing. Recompile after any sensor
+edit.
+
+### Per-stage sensor matrix (33 framework stages)
+
+| Stages | `sensors:` |
+|---|---|
+| 3 initialization (workspace-scaffold, workspace-detection, state-init) | `[]` (deterministic setup, no agent-authored markdown) |
+| `intent-capture` | `[claim-sources, required-sections, upstream-coverage]` (`claim-sources` checks visible inline provenance, authoritative source-register values, and exact human-confirmed assumptions across the stage's deliverables) |
+| 6 other ideation, 6 other inception, 7 operation markdown stages | `[required-sections, upstream-coverage]` |
+| `user-stories`, `domain-design`, `units-generation` | `[required-sections, upstream-coverage, traceability]` |
+| `build-and-test` | `[required-sections, upstream-coverage, type-check]` (linter intentionally omitted — build runs canonical lint) |
+| `ci-pipeline` | `[required-sections, upstream-coverage, linter, type-check]` |
+| 4 per-Unit construction-design stages (`functional-design`, `infrastructure-design`, `nfr-design`, `nfr-requirements`) | `[required-sections, upstream-coverage, linter, type-check, traceability]` |
+| `code-generation` | `[required-sections, traceability]` (`linter` and `type-check` not imported: they ran on every file write and nothing read their results) |
+
+`traceability` runs at the gate (`fire_on: gate`), on each stage's finished
+tables. Requirements Analysis imports no check for its own
+`traceability.json`: it records there the FR and NFR IDs `requirements.md`
+defines, as written (`ids`, each with its `kind` and, for a sub-requirement,
+`of`), and every later check takes those IDs from it; a record that is missing
+or not exact leaves each table's requirements as the table lists them, plus the
+IDs the FR and NFR patterns find in `requirements.md`, as before the record. A later
+stage starts its table with `engine sensor-traceability --stage <slug>
+--output-path <table> --write-upstream`, which adds every upstream ID the check
+asks for, each with a `GAP` row, and writes nothing when nothing is missing.
+
+Forks customise stages by editing the stage's `sensors:` list directly
+— the binding lives next to the thing being customised. A manifest is a
+pure capability descriptor; it carries no stage-targeting field (there is
+no `applies_to:` — pull authoring removed it). The strict-additive runtime
+applies: if a fork wants a sensor on a stage, it imports it; if it does
+not, it omits it. There is no override layer to reason about.
+
+---
+
+## `matches` filter
+
+`matches` is an optional top-level capability descriptor on the manifest. It
+declares the glob shape of files the sensor can analyse — *"this sensor analyses
+files matching this glob"* — and is consumed at dispatch, not by the resolver
+at compile time.
+
+| Manifest | `matches` |
+|---|---|
+| `aidlc-claim-sources.md` | `**/{aidlc-docs,intents}/**` |
+| `aidlc-required-sections.md` | `**/{aidlc-docs,intents,codekb}/**` |
+| `aidlc-upstream-coverage.md` | `**/{aidlc-docs,intents,codekb}/**` |
+| `aidlc-traceability.md` | `**/traceability.json` |
+| `aidlc-linter.md` | `**/*.{ts,js}` |
+| `aidlc-type-check.md` | `**/*.{ts,tsx}` |
+
+For `fire_on: write`, `matches` is the fire filter: the hook compares the path
+being written against the glob and an entry without a glob never fires. For
+`fire_on: gate`, `gate-start` and `revise` enumerate every existing declared
+deliverable, skip paths outside each sensor's `matches` capability, and dispatch
+only matching paths; an omitted glob accepts every deliverable. `upstream-coverage` and `claim-sources`, which
+read the whole stage's output, dispatch once per output folder, on its first
+deliverable that is not a questions or timestamp file. At a code knowledge base
+stage (Reverse Engineering), `required-sections` and `upstream-coverage`
+(`PATH_SET_SENSOR_IDS`, `aidlc-graph.ts`) dispatch once for the stage: the fire
+names the first matching path and takes every matching path on stdin behind
+`--paths-stdin json`, the sensor evaluates each file (or folder) as it would
+alone, and a failed fire's `SENSOR_FAILED` row lists the failing files in its
+`Failed outputs` field, which the gate's check line reads to name
+`<repo>/<file>`. A blocking binding holds every path the fire covers to the bytes
+fingerprinted before it. A call for one file never reads stdin. A gate the engine
+approves itself under Construction autonomy dispatches only blocking sensors
+(advisory evidence has no reader there). All six shipped
+manifests declare a glob. The compile resolver copies it into
+`sensors_applicable[]`.
+
+An empty string (`matches: ""`) is dropped at parse time, so it acts as an
+omitted glob. Write-fired sensors
+should declare a glob; gate-fired sensors may omit it to analyze every declared
+deliverable.
+
+### Cross-references between rules and sensors
+
+Rule files use `pairing: aidlc-required-sections` (with the `aidlc-`
+prefix) to feed-forward into a sensor; the sensor manifest's `id:` is
+`required-sections` (no prefix). The doctor coverage check normalises
+by stripping the `aidlc-` prefix from the rule's `pairing:` value
+before matching against the manifest `id`.
+
+---
+
+## `default_severity`
+
+`advisory` outcomes produce their audit rows but do not block the stage gate.
+Before the gate, the advisory gate checks run once when the stage's documents
+are handed on (`completionChecksStep` in `aidlc-state.ts`): the review request
+(`aidlc-log.ts review`, through the state tool's `completion-checks` command,
+which prints `{"held":false}` or `{"held":true,"message":...}`), or, when no
+review was asked for in the attempt, the report that opens the gate or shows it
+again after a revision. The first such hand-off of an attempt (the floor
+`reviewAttemptWindow` reads) fires the advisory checks on the scope's declared
+outputs (one Unit's, with `Unit` on the rows) when none of its (check, output)
+pairs has a `SENSOR_FIRED` row since the floor (paths compared canonically),
+once every required output exists. When
+a fire reports findings the hand-off records nothing and returns a `print`: the
+gate's own sentence for each, the detail files and the same command. A pass
+with a note holds nothing. A review the person asked for (`--person-asked`), a
+`--retry-pending` or `--single` request, the person's Override pick, a swarm
+worker's checkout and a gate the engine approves itself are not held.
+When the gate opens or is shown again, the orchestrator's reply carries, in
+its `narration` on a line after what the stage produced, one sentence per check whose
+latest result on a declared output is a failure (`failedCheckNotices` in
+`aidlc-state.ts`, at most three sentences and a count), so the agent says it to
+the person with the approval question. The change lines stay what changed.
+Then one line, however many, names the checks that could not run (their script
+crashed or did not start), on a declared output or on a file the stage wrote that
+is still there (a write-fired check such as `type-check`). A check that could
+not run, or a pass recorded with a note (tool unavailable), evaluated nothing and
+does not clear an earlier failure; a Unit's own gate names that Unit's outputs
+and writes only; with Sensors off nothing is said.
+A `blocking` gate binding proceeds only on a verified pass. Reported findings,
+dispatcher exit/spawn/timeout failures, malformed or mismatched verdicts,
+`SENSOR_BUDGET_OVERRIDE`, `SENSOR_COULD_NOT_RUN`, and `SENSOR_PASSED` rows
+carrying a note all stop `gate-start`, `revise`, or approve-time recovered
+revision re-entry before the gate opens.
+
+The operator can fix the findings and retry, or make a separate explicit
+override decision. The conductor records a `DECISION_RECORDED` offering
+`Fix findings,Override blocking sensors`, waits for a new human turn, records
+the exact `QUESTION_ANSWERED`, then retries the gate report with
+`--override-blocking-sensors --user-input "Override blocking sensors"`. While
+that pick stands (nothing asked, answered or sent back on the stage since it,
+and the gate not yet open), `next` names the same report instead of the stage,
+outside autonomy, team Unit gates and a Unit step a solo walk owes first. A
+bare flag, an unoffered/paraphrased choice, a missing human-backed receipt, or
+autonomous mode is refused. The recorded answer names its option by label or
+by its number on the offered list. Fix findings starts a new attempt the way
+Request Changes does: the reviewed outputs open for the fix, and the retried
+report needs a fresh review. Where each Unit's review is its own (unit-major
+work, Construction checkpoints, team-owned Units), that is the pick's Unit when
+it was logged with one, and otherwise only the Units whose outputs the failing
+blocking check named in its latest result; a check that named no Unit's output,
+or stage-major work, starts every Unit again.
+A successful override records the sensor ids,
+optional detail paths, and evaluation reasons on `STAGE_AWAITING_APPROVAL`.
+Revalidating an already-open gate emits a fresh row with `Revalidated: true`,
+consuming the authorization receipt instead of leaving it reusable.
+In this release, a write-fired sensor may declare `blocking`, but PostToolUse
+dispatch remains advisory.
+
+---
+
+## `fire_on`
+
+`write` is the default and preserves incremental PostToolUse feedback. `gate`
+fires once per existing declared deliverable (once per output folder for
+`upstream-coverage` and `claim-sources`, and once for the stage at Reverse
+Engineering for `required-sections` and `upstream-coverage`) immediately before `gate-start`
+opens the first gate, before `revise` re-enters the gate after revision work,
+and before the approve-time revision backstop performs recovered re-entry. When
+no person will answer the gate (the engine approves it itself under Construction
+autonomy), only blocking sensors fire: advisory evidence has no reader there.
+Dispatch happens outside the state transaction because `aidlc-sensor.ts fire`
+takes the audit lock around both its `SENSOR_FIRED` and terminal rows.
+Blocking dispatch fingerprints every matching artifact before evaluation,
+checks that fingerprint after each sensor, and checks it again inside the state
+transaction. Changed bytes refuse gate entry and must be evaluated on a retry.
+
+The dispatcher prints one compact JSON verdict after the terminal row:
+`fire_id`, `sensor_id`, `stage`, `output_path`, `result`, `detail_path`, and an
+optional `note`. Gate enforcement validates the verdict identity and treats
+anything other than an unnoted `passed` result as non-passing for a blocking
+binding. Explicit `--artifacts` paths and discovered deliverables are resolved
+canonically and must remain inside the stage's canonical produce directories;
+absolute paths, traversal, and symlink escapes cannot redirect a sensor.
+
+A `failed` result writes its findings to `detail_path`, a fresh
+`<sensor-id>-<fire-id>.md` file under the stage's sensor directory. A later
+unnoted `passed` result removes that sensor's earlier reports for the same
+output only. Reports for the stage's other outputs stay in place, and so do
+reports when the later result is a noted pass or a budget override, because
+those evaluated nothing. The earlier `SENSOR_FAILED` row keeps its
+`Detail path` after a prune; the audit row, not the file, is the record.
+
+---
+
+## `command:` invocation contract
+
+The manifest's `command:` is the **canonical invocation prefix**, not
+the full argv — each shipped sensor names its own per-sensor script. The
+dispatcher (`aidlc-sensor.ts`) appends runtime context at fire time: always
+`--stage <stage-slug>`, then the file flag the manifest's `input_schema`
+declares. A code sensor declares `file_path` and gets `--file-path <file>`; a
+document sensor declares other keys (`output_path`, `stage_slug`) and gets
+`--output-path <file>`:
+
+```
+<command> --stage <stage-slug> --output-path <file-being-written>   # document sensor
+<command> --stage <stage-slug> --file-path   <file-being-written>   # code sensor
+```
+
+A manifest that declares no `input_schema` keys keeps the original routing, in
+which only `linter` and `type-check` get `--file-path`. So a code sensor that a
+fork or plugin adds must declare the key, or its script receives
+`--output-path`:
+
+```yaml
+input_schema:
+  file_path: string
+```
+
+So a manifest with:
+
+```yaml
+command: aidlc engine sensor-required-sections
+```
+
+is dispatched with at least `--stage <slug> --output-path <file>` appended
+(plus the template flags `required-sections` gets by id). Firing it by hand
+against an intent statement with one H2 heading:
+
+```text
+$ aidlc engine sensor fire required-sections --stage intent-capture --output-path aidlc/spaces/default/intents/261013-tagged-notes/ideation/intent-capture/intent-statement.md
+{"fire_id":"f00255f3","sensor_id":"required-sections","stage":"intent-capture","output_path":"aidlc/spaces/default/intents/261013-tagged-notes/ideation/intent-capture/intent-statement.md","result":"failed","detail_path":"aidlc/spaces/default/intents/261013-tagged-notes/.aidlc-engine/sensors/intent-capture/required-sections-f00255f3.md"}
+```
+
+The detail file's findings (its JSON block shown here without the fence):
+
+```text
+## Findings
+
+{
+  "pass": false,
+  "h2_count": 1,
+  "headings": [
+    "## Problem Statement"
+  ],
+  "findings_count": 1
+}
+```
+
+The manifest does not encode the per-fire flags. The dispatcher
+appends them; the manifest stays a pure capability descriptor.
+
+---
+
+## Gate-ritual handoff (surface stdout / selections-file in)
+
+The §13 learning gate is tool-as-actor. The round-trip between the
+deterministic tool (`aidlc-learnings.ts`) and the conductor (the live
+`/aidlc` session) has two legs, with a knowledge step and a judgement
+step between them:
+
+1. **`surface` (stdout).** The conductor runs it only when the person
+   corrected it in the stage, or asked it to keep something for next time
+   (reading that is the conductor's knowledge). `aidlc engine learnings surface
+   --slug <stage-slug> --correction '<their change>'` (one `--correction` per
+   correction, or a `--correction-file` in the record's answer-text folder for
+   one holding a character a shell reads) prints structured JSON: `candidates[]` (one per correction, each
+   carrying `id`, `correction`, `default_scope: "project"`) and `questions[]`:
+   for each, "You asked me to <correction>. Keep that for next time?" with the
+   exact options `Yes, for this project`, `Yes, for the team`, `No` and its
+   `question_kind`. With no `--correction` it prints no question. The stage's
+   `memory.md` diary is counted (`memory_entries_total`) and never offered. No
+   AskUserQuestion field names: pure domain data.
+2. **Conductor asks those questions (judgement is the person's).** Each is
+   its own question. The person's pick is the only thing asked: the conductor
+   writes the practice line from their correction and routes it to the
+   fitting heading itself. A note they asked to keep is not asked about.
+3. **Admission conflict-check (knowledge → orchestrator-LLM; gates which
+   selections reach persist).** For each kept learning, the conductor
+   compares the single proposed dated entry against `org.md`'s
+   matching `## <section>` (the single-line variant of the §5 admission
+   gate). On a contradiction the conductor surfaces the conflicting org sentence inline
+   and the user revises / skips / escalates (judgement → user; no
+   user-override path). Only conflict-clear or user-escalated selections
+   proceed. Sensor manifests have no org-section analogue and skip the check.
+4. **`persist` (selections-file in).** The conductor writes the kept
+   selections to the `selections_file` path `surface` returns:
+   `<record>/.aidlc-engine/learnings/<slug>-selections.json`, or with no intent record
+   `aidlc/spaces/<space>/intents/.aidlc-engine/learnings/<slug>-selections.json` (both
+   gitignored), and calls `aidlc engine learnings persist
+   --slug <slug> --selections-json <selections_file>`. The tool is the deterministic
+   writer — it never judges conflicts, and it reads only that file (a selections file
+   anywhere else, or reached through a link, is refused, so two chats in one project
+   never save each other's picks); it routes each learning as a practice to
+   `aidlc/spaces/<surface-time-space>/memory/{project,team}.md` and, for a sensor selection, does the
+   two-write install (manifest + originating stage `sensors:` frontmatter)
+   inside one `withAuditLock`, then emits `RULE_LEARNED` / `SENSOR_PROPOSED`.
+
+The selections-file is the replay artefact: a crashed persist replays the
+same JSON without re-prompting the human (content-presence idempotency via a
+`<!-- cid:<intent-slug>:<slug>:<content-hash> -->` marker per written line —
+    the full SHA-256 hash of the learning's own text, not its positional candidate id). The
+selections-file also carries `space`/`intent`, bound once when the
+candidates were surfaced; `persist` uses those, never re-resolving the live
+    active-intent cursor itself. Before writing, it verifies that this space
+    and any non-null intent record still exist and that the requested slug
+    matches the surface-time `stage_slug`.
+
+---
+
+## Defaults for scaffolded manifests
+
+When a sensor proposal is confirmed at the gate, the gate-ritual tool
+scaffolds a new **project-tier** manifest at
+`<project>/.claude/sensors/aidlc-<id>.md` — never the shipped framework
+distribution (a per-project learning loop must not mutate the framework;
+framework-distribution paths are rejected). The selection supplies the fields
+and the tool writes them as given:
+
+| Field | Written as | Note |
+|---|---|---|
+| `id`, `kind`, `command`, `default_severity`, `description`, `matches` | the selection's strings | all six are required; `persist` refuses a selection missing one. The manifest must still pass the schema: `kind: deterministic`, and a `command` naming a worker in the tools folder, on a native install named `bun .claude/tools/aidlc-sensor-<id>.ts` |
+| `category` | written when the selection has one | |
+| `timeout_seconds` | written when supplied | dispatcher fallback is `1200` seconds |
+| `fire_on` | not written | so a scaffolded sensor is write-fired (the default) |
+| `input_schema`, `output_schema` | not written | with no `input_schema` keys a custom sensor gets `--output-path` |
+
+After scaffolding the manifest, the gate-ritual tool — inside the same
+`withAuditLock` transaction — appends the new id to the originating
+stage's `sensors:` frontmatter list (the pull-authoring two-write
+install). The sensor is fully wired when the next workflow compiles. This
+is the one sanctioned stage-frontmatter edit: it grows the import list
+(immutable in shape, not in contents), never the `## Steps` / `## Sensors`
+/ `## Learn` body.
+
+The six shipped manifests set explicit per-fire caps: `claim-sources`,
+`required-sections`, `upstream-coverage`, and `traceability` use
+`timeout_seconds: 300`; `linter` and `type-check` use `1200`.
+The dispatcher fallback is the sum of the five-minute ordinary and
+fifteen-minute compound [runtime backstops](06-hooks-and-tools.md#runtime-and-native-hook-budgets).
+Each ESLint probe/config/lint subprocess has five minutes; TypeScript's probe
+has five minutes and compilation has fifteen. The per-fire cap bounds the
+whole sensor process, including its nested commands. Explicit shorter manifest
+values remain authoritative.
+
+The write hook gives each dispatcher subprocess thirty minutes by default;
+`AIDLC_SENSOR_TIMEOUT_MS` (or the project/user `sensorTimeoutMs` setting)
+overrides that enclosing allowance. A shorter enclosing cap can interrupt the
+dispatcher before it publishes a terminal sensor row; the hook records a drop
+for doctor. Reaching the sensor's own per-fire cap produces
+`SENSOR_BUDGET_OVERRIDE`. An incomplete nested lint/compile execution follows
+the could-not-run path, and an unavailable probe follows the tool-unavailable
+path; neither establishes a verified pass for a blocking gate.
+Gate dispatch separately accepts `AIDLC_GATE_SENSOR_DISPATCH_TIMEOUT_MS`;
+when unset, it adds no enclosing timeout beyond the sensor's per-fire cap.
+
+---
+
+## Forward-compat policy
+
+Consumers of sensor manifests (compile, dispatcher, gate-ritual
+scaffolding, doctor) MUST tolerate **unknown manifest keys**. If a
+future release adds an optional `cool_new_field:`, older consumers
+parse the manifest, ignore the field, and continue. This allows
+additive evolution of the schema without breaking forks or pre-upgrade
+workspaces.
+
+Forward-compat does NOT apply to unknown values for known keys. As
+documented in [`kind` enum](#kind-enum) above, an unknown value for
+`kind` is rejected at parse time. The same principle applies to the
+other enum-shaped fields (`default_severity`, `fire_on`).
+
+---
+
+## Reserved for future releases
+
+A few sensor capabilities are reserved in the schema but not yet
+active, so the field shape is stable when they land:
+
+- **`kind: llm` dispatch** - LLM-evaluated sensors. The schema rejects any
+  `kind` other than `deterministic` at parse time.
+- **Write-time blocking** - `blocking` is accepted on write-fired manifests,
+  but only gate-fired failures are enforced in this release; the parser does
+  not reject the combination.
+
+## Next Steps
+
+- **Rules** — the feedforward half of the control loop pairs with these
+  sensors via the `pairing:` field. See [Rule System](08-rule-system.md).
+- **The user-facing learning loop** — how sensor proposals are surfaced
+  and confirmed at the gate, and how a confirmed proposal scaffolds a
+  new manifest. See [Rules and the Learning
+  Loop](../guide/09-rules-and-the-learning-loop.md) in the User Guide.
+- **The compile boundary** — how `sensors_applicable` is resolved once
+  at workflow start and read off the graph node at fire time. See
+  [Plane Architecture](02-plane-architecture.md).
+
+The schema above plus the six shipped manifests in
+`dist/claude/.claude/sensors/` are the working examples.

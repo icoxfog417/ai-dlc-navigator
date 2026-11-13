@@ -1,0 +1,18 @@
+# This repo holds the aidlc-navigator skill (skills/). AI-DLC trial runs in this
+# folder stay local: `aidlc config` owns these paths and may rewrite them.
+/.claude/
+/aidlc/
+/aidlc.settings.json
+/aidlc.settings.local.json
+/.mcp.json
+
+# Engine folders AI-DLC writes for other harnesses
+/.kiro/
+/.codex/
+/.cursor/
+/.aidlc/
+/.opencode/
+/.agents/
+
+# Never commit an update in progress (scripts/update-aidlc-docs.sh)
+skills/*/references/.update.*

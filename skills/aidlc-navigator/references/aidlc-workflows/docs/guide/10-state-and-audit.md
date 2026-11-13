@@ -1,0 +1,361 @@
+# State Tracking and Audit Trail
+
+Each piece of work keeps two committed records that together provide full traceability from intent to production: the **state file** tracks where you are in the workflow, and the **audit trail**, a folder of files, records every decision, action, and event along the way.
+
+---
+
+## State File (`aidlc-state.md`)
+
+Each intent has its own state file at `aidlc/spaces/<space>/intents/<YYMMDD>-<label>/aidlc-state.md` (under the intent's record dir) — the single source of truth for that intent's workflow progress. The engine reads the active intent's state file on every session start to determine what has been completed, what is in progress, and what comes next.
+
+The initial description is stored beside it in
+`project-description.json` as one JSON string, exactly as typed except that
+anything shaped like a key, token or password is masked (see
+[Keys and passwords you type](#keys-and-passwords-you-type)). `aidlc-state.md` names that
+committed source and keeps only a safe single-line
+`Project` preview, so multiline user input cannot introduce additional state
+fields. Pre-2.6.115 records without the source marker continue to use the
+existing `Project` field as their description; a marked new record whose file
+is missing or malformed fails source validation instead of silently degrading.
+JSON decoding preserves the original description even if Git normalizes the
+sidecar's final line ending.
+
+### What it contains
+
+| Section | Purpose |
+|---------|---------|
+| **Project Information** | Project description, type (greenfield/brownfield) and who set it (`Project Type Source`: `workspace scan` or `you`), scope, start date, active agent |
+| **Scope Configuration** | Stages to execute, stages to skip (with reasons), depth level, test strategy, `Review Override`, and the per-intent settings: `Guard Policy`, `Guards Off` (fences lowered for this piece of work), `Guards On` (fences forced on above the policy word), `Sensors`, `Learnings`, `Summary Confirmation`, `Plan Approval`, `Collaborators`. The fence lines appear only when used and never include human presence, which has no per-work switch. |
+| **Workspace State** | Project root, detected languages, frameworks, build system |
+| **Execution Plan Summary** | Total stages, completed count, in-progress stage |
+| **Runtime State** | Revision count, Construction checkpoints, iteration and execution settings, receipt-bound Construction Verification Command, and optional Unit ownership and Unit gate rhythm |
+| **Phase Progress** | Each phase as `Pending`, `Active`, `Verified`, or `Skipped` |
+| **Stage Progress** | Per-stage checkboxes tracking completion status |
+| **Unit Progress** | Team mode only: derived per-Unit Construction stage and gate cells; rewritten by `next`, never authoritative |
+| **Current Status** | Lifecycle phase, current/next stage, status, last updated timestamp |
+| **Session Resume Point** | Last completed stage, next action, pending artifacts |
+
+Here is part of one, from a Claude Code run on the `mvp` plan just after Intent Capture was approved (shortened; the file puts a long dash between each stage and its `EXECUTE` or `SKIP`, shown here as `-`):
+
+```text
+## Scope Configuration
+- **Depth**: Standard
+- **Test Strategy**: Minimal
+- **Review Override**:
+- **Guard Policy**: off (from scope mvp)
+- **Sensors**: on (from scope mvp)
+- **Learnings**: on (from scope mvp)
+- **Summary Confirmation**: on (from scope mvp)
+- **Plan Approval**: on (from scope mvp)
+- **Collaborators**: off (from scope mvp)
+
+## Phase Progress
+- **Initialization**: Verified
+- **Ideation**: Active
+- **Inception**: Pending
+- **Construction**: Pending
+- **Operation**: Skipped
+
+## Stage Progress
+### IDEATION PHASE
+- [x] intent-capture - EXECUTE
+- [ ] market-research - SKIP
+- [-] feasibility - EXECUTE
+- [ ] scope-definition - EXECUTE
+...
+
+## Current Status
+- **Lifecycle Phase**: IDEATION
+- **Current Stage**: feasibility
+- **Next Stage**: scope-definition
+- **Status**: Running
+- **Last Updated**: 2026-10-13T10:43:59Z
+```
+
+If `Guard Policy` and the retired `Change Control` both appear with different
+policy words, status shows `strict (from conflicting state lines)` until the next
+`next`, which keeps one and writes it as the only line: the one the audit trail
+shows was set last, else the one you set, else the scope's own, else the stricter
+(a `GUARD_POLICY_SET` row with `Source: command` and a `Settled` field records it).
+It says nothing when it kept your own last choice, and once otherwise, for example:
+
+> This work had two settings for how closely AI-DLC checks changes, and they disagreed. The record does not say which was set last, so AI-DLC keeps the stricter one: it checks everything. You can change it any time.
+
+Memory-held strict still takes precedence and leaves both lines as they are. If
+both agree, the `Guard Policy` line is used. Any write of the policy line removes
+the retired line, leaving one setting.
+
+`Construction Verification Command` records the project check reused at every
+Unit/batch checkpoint. A matching current-workflow human approval receipt is
+required before `state set-construction-verification-command` writes the field;
+the field alone never authorizes execution, and generic `state set` refuses it.
+The human's **Approve** / **Request Changes** reply counts in the chat that
+asked or in a new one while it is the newest question asked. Only **Approve**
+authorizes the receipt; an unrelated reply, **Request Changes**, or a reply to
+another question does not.
+See the [recorded-command flow](12-cli-commands.md#construction-verification-command-record-human-authorization).
+
+### Six-state checkboxes
+
+Stage progress uses a six-state checkbox notation:
+
+| Checkbox | Meaning |
+|----------|---------|
+| `[ ]` | Not started |
+| `[-]` | In progress |
+| `[?]` | Awaiting your approval (gate open) |
+| `[R]` | Revising (you rejected the gate, stage is being revised) |
+| `[x]` | Completed |
+| `[S]` | Skipped while the work ran (cut via `skip`, or bypassed by a `--stage`/`--phase` jump) |
+
+A stage your plan leaves out never changes box: it stays `[ ]` with `SKIP` after its name, like `market-research` above.
+
+Stages transition through `[ ]` → `[-]` → `[?]` → `[x]` on the happy path. When you reject at the gate, the stage moves to `[R]` while it's revised, back to `[?]` when ready, and finally to `[x]` on approval. `/aidlc --status` reads the checkbox and tells you who's blocking — "Awaiting your approval on \<stage\>" for `[?]`, "Revising \<stage\> (revision N of 3)" for `[R]`.
+
+For the canonical state-machine reference (transition tables, audit-event emitters), see [Developer Reference: State Machine](../reference/12-state-machine.md).
+
+### State transitions
+
+```mermaid
+stateDiagram-v2
+    state "[ ] Not Started" as NotStarted
+    state "[-] In Progress" as InProgress
+    state "[?] Awaiting Approval" as Awaiting
+    state "[R] Revising" as Revising
+    state "[x] Completed" as Completed
+    state "[S] Skipped" as Skipped
+
+    [*] --> NotStarted
+    NotStarted --> InProgress : Stage begins
+    InProgress --> Awaiting : Work done, gate opens
+    Awaiting --> Completed : You approve
+    Awaiting --> Revising : You request changes
+    Revising --> Awaiting : Revision done, re-enter gate
+    NotStarted --> Skipped : skipped, or jumped past
+    InProgress --> Skipped : Cut mid-flight
+    Revising --> Skipped : Abandon after rejection
+    Awaiting --> Skipped : Forward jump
+    Completed --> NotStarted : Redo (artifacts deleted)
+```
+
+<!-- Text fallback: [ ] Not Started transitions to [-] In Progress when a stage begins. [-] In Progress transitions to [?] Awaiting Approval when stage work is done and the gate opens. [?] Awaiting Approval transitions to [x] Completed when you approve, or to [R] Revising when you request changes. [R] Revising transitions back to [?] Awaiting Approval when revision is complete. [ ] Not Started, [-] In Progress, [?] Awaiting Approval, and [R] Revising can each transition to [S] Skipped via a skip, a jump, or abandonment. [x] Completed transitions back to [ ] Not Started on redo (artifacts deleted). -->
+
+### Normal, revision, skip, redo, and jump flows
+
+- **Normal flow**: `[ ]` -> `[-]` -> `[?]` -> `[x]` (stage begins, work completes, gate opens, you approve)
+- **Revision flow**: `[?]` -> `[R]` -> `[?]` -> `[x]` (you reject, stage is revised, gate re-opens, you approve)
+- **Scope skip flow**: none: a stage not in the plan stays `[ ]`, marked `SKIP` when the work is created
+- **Redo flow**: `[x]` or `[-]` -> `[ ]` -> `[-]` (you request redo, artifacts are deleted, stage re-executes)
+- **Jump flow**: `[-]` at stage A, you request jump to stage B, intervening stages are marked `[S]`
+
+---
+
+## Audit Trail (`audit/`)
+
+The audit trail records the active intent's decisions and events for later
+stages and recovery. AIDLC's tools and hooks write it; reads stay open by any
+means. The write guard is a guardrail, not a security boundary. See
+[Audit Trail Rules](../reference/04-stage-protocol.md#audit-trail-rules) for
+the owning commands and the read-only query contract.
+
+### 126-event taxonomy
+
+Events are organized into 26 categories:
+
+| Category | Count | Events |
+|----------|------:|--------|
+| **Workflow Lifecycle** | 8 | `WORKFLOW_STARTED`, `WORKFLOW_COMPLETED`, `WORKFLOW_PARKED`, `WORKFLOW_UNPARKED`, `WORKFLOW_ARCHIVED`, `WORKFLOW_UNARCHIVED`, `INTENT_REPOS_CHANGED`, `INTENT_CHECKOUTS_CHANGED` |
+| **Phase Lifecycle** | 4 | `PHASE_STARTED`, `PHASE_COMPLETED`, `PHASE_VERIFIED`, `PHASE_SKIPPED` |
+| **Stage Lifecycle** | 9 | `STAGE_STARTED`, `STAGE_AWAITING_APPROVAL`, `STAGE_REVISING`, `STAGE_COMPLETED`, `STAGE_SKIPPED`, `STAGE_JUMPED`, `STAGE_DEFINITION_CHANGED`, `STAGE_OUTPUT_AMENDED` (a stage's own document changed after you approved it and before your next message), `SOURCE_WORK_NOT_FOUND` (Code Generation found no new code where it looked, and what it did: told the agent, put the question to you, or stood aside under Guard Policy off) |
+| **Session** | 6 | `SESSION_STARTED`, `SESSION_RESUMED`, `SESSION_COMPACTED`, `SESSION_ENDED`, `HUMAN_TURN` (hook-emitted), `HOST_TURN` (hook-emitted, advisory: a prompt the host made for the agent, never a person's turn) |
+| **Initialization** | 3 | `WORKSPACE_SCAFFOLDED`, `WORKSPACE_SCANNED`, `WORKSPACE_INITIALISED` |
+| **Navigation** | 9 | `SCOPE_CHANGED`, `SCOPE_DETECTED`, `DEPTH_CHANGED`, `TEST_STRATEGY_CHANGED`, `REVIEW_CLASS_CHANGED`, `RECOMPOSED`, `WORKSPACE_RECLASSIFIED`, `SCOPE_SAVED`, `PLUGIN_SELECTION_CHANGED` |
+| **Guard Policy** | 5 | `GUARD_POLICY_SET`, `CHANGE_CONTROL_SET` (retired name, still read), `CHANGE_ACCEPTED`, `GUARD_RESTORED`, `GUARD_STOOD_ASIDE` |
+| **Ceremony** | 1 | `CEREMONY_SET`, emitted by `aidlc-utility.ts config-change` (also via the shared `scope-change` applier). Fields: `Key` (`sensors`, `learnings`, `summary_confirmation`, `plan_approval`, `collaborators`), `Old`, `New`, `Source` (`you` for an explicit set, `scope <name>` for an inherited default). `Old` is the previously saved value (raw text if invalid; scope default if absent), not the environment-effective value. One row per real stored field/source change; no-op commands emit none. |
+| **Interaction** | 17 | `DECISION_RECORDED`, `GATE_APPROVED`, `GATE_REJECTED`, `QUESTION_ANSWERED`, `QUESTION_REPLIED`, `QUESTION_UNANSWERED`, `REQUEST_ROUTED`, `SUMMARY_CONFIRMATION_RECORDED`, `VERIFICATION_COMMAND_RECORDED`, `CONSTRUCTION_POLICY_RECORDED`, `CHECKPOINT_VERIFICATION_RECORDED`, `PLAN_APPROVAL_RECORDED`, `PLAN_APPROVAL_SKIPPED`, `PLAN_APPROVAL_OVERRIDDEN`, `REVIEW_REQUESTED`, `REVIEW_COMPLETED`, `PIPELINE_LINK_COMPLETED` |
+| **Unit Configuration and Lifecycle** | 9 | `UNIT_OWNERSHIP_SET`, `UNIT_GATE_RHYTHM_SET`, `CONSTRUCTION_POLICY_SET`, `UNIT_STARTED`, `UNIT_PAUSED`, `UNIT_RESUMED`, `UNIT_COMPLETED`, `UNIT_SKIPPED`, `UNIT_MERGED` |
+| **Artifact** | 3 | `ARTIFACT_CREATED`, `ARTIFACT_UPDATED` (write-audit-log hook), `ARTIFACT_REUSED` |
+| **Subagent** | 4 | `SUBAGENT_DISPATCHED` (deliver-stage-rules hook, or log-subagent for Cursor and Kiro IDE), `SUBAGENT_COMPLETED` (log-subagent hook), `SUBAGENT_PROMPT_UNMATCHED` (Copilot adapter, advisory), `REVIEW_VERDICT_DICTATED` (no longer written; earlier releases' plan-approval-guard hook. The reviewer's own `**Verdict Dictated:**` line now rides `REVIEW_COMPLETED`) |
+| **Reviewer Enforcement** | 2 | `REVIEWER_SCOPE_BLOCKED` (reviewer-scope hook), `REVIEW_FREEZE_BLOCKED` (review-freeze hook) |
+| **Plan Approval** | 2 | `PLAN_APPROVAL_BLOCKED`, `GUARD_DISABLED` (plan-approval-guard hook, or a fence you switched off for this piece of work) |
+| **Guard Refusals** | 2 | `STATE_TRANSITION_BLOCKED` (state-transition guard refused a delegated agent's lifecycle or routing command), `STAGE_RULES_BLOCKED` (stage rules refused for size, or a required rule file could not be read); each carries `Guard`, `Reason`, and the `Target`/`Session` it refused, one row per refusal |
+| **Documents** | 3 | `DOCUMENT_INDEXED`, `DOCUMENT_UPDATED`, `DOCUMENT_REMOVED` — space-level shard even when intent-scoped |
+| **Utility** | 1 | `HEALTH_CHECKED` |
+| **Error/Recovery** | 3 | `ERROR_LOGGED`, `RECOVERY_COMPLETED`, `COORDINATION_STOOD_ASIDE` |
+| **Construction Bolt** | 4 | `BOLT_STARTED`, `BOLT_COMPLETED`, `BOLT_FAILED`, `AUTONOMY_MODE_SET` |
+| **Worktree** | 7 | `WORKTREE_CREATED`, `WORKTREE_MERGED`, `WORKTREE_DISCARDED`, `STATE_FORKED`, `STATE_MERGED`, `AUDIT_FORKED`, `AUDIT_MERGED` |
+| **Practices** | 4 | `PRACTICES_DISCOVERED`, `PRACTICES_AFFIRMED`, `PRACTICES_OVERRIDE`, `PRACTICES_SECTION_EMPTY` |
+| **Merge Dispatch** | 3 | `MERGE_DISPATCH_INVOKED`, `MERGE_DISPATCH_RETURNED`, `MERGE_DISPATCH_FALLBACK` |
+| **Sensors** | 6 | `SENSOR_FIRED`, `SENSOR_PASSED`, `SENSOR_FAILED`, `SENSOR_COULD_NOT_RUN`, `SENSOR_BUDGET_OVERRIDE`, `GUARDRAIL_LOADED` |
+| **Learning Loop** | 3 | `MEMORY_EMPTY`, `RULE_LEARNED`, `SENSOR_PROPOSED` |
+| **Swarm** | 7 | `SWARM_STARTED`, `SWARM_UNIT_CONVERGED`, `SWARM_SOURCE_MERGED`, `SWARM_UNIT_FAILED`, `SWARM_BATON_RETURNED`, `SWARM_COMPLETED`, `SWARM_DEGRADED` |
+| **Commit Provenance** | 1 | `SOURCE_COMMITTED` (`aidlc attest anchor`, or the opt-in session-start sweep — enrichment only; `resolve` never reads it) |
+
+### What gets logged and when
+
+- **Every stage start and completion** is logged with `STAGE_STARTED` and `STAGE_COMPLETED` events
+- **Every file the agent writes or edits with its file tools** in the intent's record dir or the space's `codekb/` (except the `audit/` shards themselves) is logged by the write-audit-log hook; a file written by a shell command is not
+- **Every approval gate decision** (approve, request changes, accept-as-is) is logged
+- **Every question answer** you provide is recorded
+- **Every subagent completion** is logged by the log-subagent hook, and every helper sent is logged when it is sent
+- **Every error and recovery** is logged
+
+### How to read the audit log
+
+Each shard is plain Markdown, one block per event. Two from the Intent Capture
+stage of the run above:
+
+```text
+## Stage Start
+**Timestamp**: 2026-10-13T10:27:19Z
+**Event**: STAGE_STARTED
+**Stage**: intent-capture
+**Agent**: aidlc-product-agent
+
+---
+
+## Question Answered
+**Timestamp**: 2026-10-13T10:34:07Z
+**Event**: QUESTION_ANSWERED
+**Stage**: intent-capture
+**Details**: Q9: One total per SKU
+**Person Reply**: One total per SKU
+```
+
+Run `aidlc engine audit history` for the event timeline as JSON, or add
+`--stage <slug>` to review one stage. Each event carries its timestamp, type,
+and named fields. Results are oldest first; `unordered: true` marks tied
+entries with no known order across writers. Free-form notes appear as `NOTE`
+entries with their heading and body text. `--event NOTE` selects notes;
+`--stage` excludes them.
+
+Run `aidlc engine log answers --stage <slug>` (add `--unit <unit>` for a Unit)
+for paired earlier questions and answers. One reply pairs with every question
+logged for the menu it answered. Open questions and the rare ambiguous answer
+(no question before it, or writers tied at one second) are reported apart.
+Neither command changes files or takes a lock.
+
+### Keys and passwords you type
+
+The state file, `project-description.json` and the audit shards are committed
+with your work, so AI-DLC masks anything shaped like a key, token or password
+before it writes them: a vendor token (GitHub, GitLab, Slack, Stripe, OpenAI,
+Anthropic, Google, npm, Hugging Face, an AWS access key), a private key block,
+a JWT or `Bearer` token, the password in an address
+(`postgres://app:[masked]@db`), and a value set after a secret's name
+(`password=`, `DB_PASSWORD=`, `GITHUB_TOKEN:`) when the value has a letter and
+a digit or symbol in it (after a password's name, words joined by `-`, `.` or
+`_` count too). A reference such as `$DB_PASSWORD` stays, and so does a
+placeholder such as `your-api-key-here`. The rest of your words stay as you typed them, for
+example `**Person Reply**: Approve, the deploy key is [masked]`. Your whole
+message stays only in `aidlc/.aidlc-sessions/`, which AI-DLC's `.gitignore`
+block keeps out of commits. When your message held one, AI-DLC says so once in
+the chat: the chat itself still received it, so change the key where it was
+issued if it is real. Masking goes by shape only, so a secret written another
+way (`my password is hunter2`) is kept as typed, and the doctor bundle masks
+the same shapes and more.
+
+### Audit event flow
+
+When a stage executes and produces artifacts, the audit trail captures the full sequence:
+
+```mermaid
+sequenceDiagram
+    participant O as Orchestrator
+    participant E as Engine
+    participant S as Stage Execution
+    participant H as Audit Hook
+    participant A as audit/ shard
+
+    O->>E: Request next directive
+    E->>A: Emit STAGE_STARTED
+    O->>S: Execute stage work
+    S->>S: Write artifact to the intent's record dir
+    S->>H: PostToolUse hook fires
+    H->>A: Append ARTIFACT_CREATED or ARTIFACT_UPDATED
+    S->>O: Stage work complete
+    O->>A: Log approval gate options
+    O->>O: Present approval gate to user
+    O->>E: Report approved or rejected
+    E->>A: Emit gate outcome
+    E->>A: Emit STAGE_COMPLETED on approval
+```
+
+<!-- Text fallback: The orchestrator requests the next directive and the engine emits STAGE_STARTED. Stage execution writes artifacts; the PostToolUse hook appends ARTIFACT_CREATED or ARTIFACT_UPDATED. After the stage work and approval gate, the orchestrator reports the outcome. The engine emits the gate result and, on approval, STAGE_COMPLETED while updating state and routing. -->
+
+---
+
+### Source-bound review receipts
+
+Code Generation writes application source outside the intent record, so its
+terminal per-unit review receipt binds more than markdown artifacts. The
+reviewed unit's strict `source-manifest.json` lists created, modified, or deleted
+source paths; `Unit Source Fingerprint` binds those claims and manifest bytes.
+At completion the engine validates each unit newest-first (a newer reviewed
+claim can own an intentional shared-file integration), then compares the union
+of fresh claims with the stage-entry source baseline. Under Guard Policy
+strict, an uncovered change or a stale unit blocks all four completion routes
+and offers that unit's one bounded stale-receipt recovery. A file Git ignores
+that no unit can claim (neither tracked nor registered in
+`.aidlc-source-paths.json`, such as build output or a test run's record) is not
+an uncovered change, nor is a path that file's `exclude` list leaves out of the
+walk, even when the line was written after the stage started (a tool's cache the
+project does not ignore, a nested repository that is not this project's code);
+the registry file itself is AI-DLC's own, so no unit claims it. The strict
+refusal names the three ways through: the unit that made a change lists the path
+and is reviewed once more, a change nobody meant is undone, or a path that is
+not source is excluded there. Under relaxed or
+off, an uncovered change is kept: completion records it once as
+`CHANGE_ACCEPTED` and names the files in one line ("These files changed outside
+any unit's work in Code Generation: ... Kept them."). A stage-entry baseline
+that is missing on this machine (a fresh clone) skips the check with one line
+under every Guard Policy; one that is here and does not match still blocks
+completion under strict.
+
+The workspace-global `Source Fingerprint` is normally the outer post-review
+mutation boundary. One narrow reconciliation makes the documented “revert”
+recovery real: after any unclaimed baseline change (addition, modification, or
+deletion) is fully reverted, completion can continue
+only when the stage baseline is present and valid, every applicable unit still
+has a fresh modern binding, and the baseline-to-current delta has zero
+unclaimed paths. Ordinary post-review edits, stale or legacy unit evidence, and
+any remaining unclaimed path still refuse. Pre-upgrade fieldless receipts or
+baselines retain documented migration fail-open behavior; missing or corrupt
+modern evidence fails closed. `AIDLC_SKIP_SOURCE_FRESHNESS=1` is the
+deterministic emergency off-switch and must be present again when consuming a
+bypass-marked receipt.
+
+An AI-DLC update after the review changes only AI-DLC's own files, so it leaves
+the review current when the receipt's `Source Listing` is on this machine; a
+receipt without one is compared by `Source Fingerprint` as above.
+
+---
+
+## How State and Audit Work Together
+
+The state file and audit trail serve complementary purposes:
+
+| Concern | State File | Audit Trail |
+|---------|-----------|-------------|
+| **Purpose** | Track current position and progress | Record full history of events |
+| **Read by** | Orchestrator (for routing and resume) | Users and auditors (for traceability) |
+| **Update pattern** | Overwritten at each state change | Append-only (never modified) |
+| **Session resume** | Primary source for determining where to continue | Provides the original project description and decision context |
+| **Git policy** | Commit to version control | Commit (per-clone shards under `audit/`; no merge conflicts) |
+
+The orchestrator uses `aidlc-state.md` as the durable cursor. Team-owned
+Construction additionally derives Unit cells, receipt floors, gates, and merged
+rows from the active intent's audit shards; solo routing keeps the state-only
+cursor behavior. The audit trail also lets you trace every decision from intent
+through to production.
+
+If the state file is corrupted, you can reconstruct it from the audit trail by reviewing `STAGE_STARTED` and `STAGE_COMPLETED` events. See [Troubleshooting](15-troubleshooting.md) for repair instructions.
+
+---
+
+## Next Steps
+
+- [Session Management](11-session-management.md) — How state is used for session resume
+- [Artifacts Reference](14-artifacts-reference.md) — What gets stored in the intent's record dir
+- [Troubleshooting](15-troubleshooting.md) — State corruption repair
+- [Glossary](glossary.md) — Definitions for state file, audit trail, checkpoint, compaction
