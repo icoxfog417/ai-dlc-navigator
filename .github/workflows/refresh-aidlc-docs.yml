@@ -1,0 +1,185 @@
+# Checks AI-DLC for a new release every week. When there is one, refreshes the
+# bundled docs (skills/ai-dlc-navigator/references/aidlc-workflows/) and opens a
+# pull request with the release notes and a review checklist. It never
+# publishes: after review and merge, a maintainer runs `gh skill publish`.
+# See DEVELOPMENT.md, "Update the bundled AI-DLC docs".
+#
+# Security notes (keep these true when editing):
+# - Triggers are schedule and workflow_dispatch only. Never add pull_request_target:
+#   this workflow holds a write token, and code from a PR must never run with it.
+# - Upstream content (tarball, CHANGELOG, tag names) is untrusted. It is downloaded
+#   and parsed in the `fetch` job, which can only read. The `pr` job never runs
+#   anything from the snapshot; it only reads it as text with this repo's scripts.
+# - No ${{ }} expression is placed inside a run: script; values go through env:.
+# - The write token is given to the two steps that push and open the PR, nothing else.
+name: Refresh bundled AI-DLC docs
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "AI-DLC release tag, such as v2.12.0 (empty: latest release)"
+        required: false
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: refresh-aidlc-docs
+  cancel-in-progress: false
+
+env:
+  DOCS: skills/ai-dlc-navigator/references/aidlc-workflows
+
+jobs:
+  fetch:
+    name: Download and check AI-DLC release (read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out this repo; nothing here can write
+    outputs:
+      changed: ${{ steps.refresh.outputs.changed }}
+      old: ${{ steps.refresh.outputs.old }}
+      new: ${{ steps.refresh.outputs.new }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Refresh the docs snapshot
+        id: refresh
+        env:
+          TAG: ${{ inputs.tag }}
+          AIDLC_DOCS_GITHUB_TOKEN: ${{ github.token }} # read-only here; raises the API rate limit
+        run: |
+          valid() { [[ "$1" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; }
+          tag_of() { sed -n 's/^- Tag: `\(.*\)`$/\1/p' "$DOCS/SOURCE.md"; }
+          if [[ -n "$TAG" ]] && ! valid "$TAG"; then
+            echo "::error::Tag must look like v2.12.0"; exit 1
+          fi
+          old=$(tag_of)
+          valid "$old" || { echo "::error::Unexpected Tag line(s) in SOURCE.md"; exit 1; }
+          python3 skills/ai-dlc-navigator/scripts/update-aidlc-docs.py ${TAG:+"$TAG"}
+          new=$(tag_of)
+          valid "$new" || { echo "::error::Unexpected Tag line(s) in the new SOURCE.md"; exit 1; }
+          if git diff --quiet -- "$DOCS" && [[ -z "$(git ls-files --others --exclude-standard -- "$DOCS")" ]]; then
+            changed=false
+            echo "Bundled docs are already at $new."
+          else
+            changed=true
+          fi
+          printf 'old=%s\nnew=%s\nchanged=%s\n' "$old" "$new" "$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the new snapshot
+        if: steps.refresh.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: aidlc-docs
+          path: ${{ env.DOCS }}
+          if-no-files-found: error
+          retention-days: 3
+
+  pr:
+    name: Open refresh pull request
+    needs: fetch
+    if: needs.fetch.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # push the bot/aidlc-docs-<tag> branch
+      pull-requests: write # open the pull request
+    env:
+      OLD: ${{ needs.fetch.outputs.old }}
+      NEW: ${{ needs.fetch.outputs.new }}
+      BASE: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false # the token is passed only to the push step below
+
+      - name: Validate inputs from the fetch job
+        run: |
+          for t in "$OLD" "$NEW"; do
+            [[ "$t" =~ ^v[0-9]+(\.[0-9]+)*$ ]] || { echo "::error::Unexpected tag from fetch job"; exit 1; }
+          done
+          echo "BRANCH=bot/aidlc-docs-$NEW" >> "$GITHUB_ENV"
+
+      - name: Skip if this release already has a refresh branch
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --silent 2> /dev/null; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state all --limit 20 \
+            --json isCrossRepository --jq '[.[] | select(.isCrossRepository | not)] | length')
+          if [[ "$prs" -gt 0 ]]; then
+            echo "Branch $BRANCH already has a pull request; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Branch $BRANCH exists without a pull request (an earlier run may have stopped, or someone else created it). Check it, delete it, and run this workflow again."
+            exit 1
+          fi
+
+      - name: Put the new snapshot in place
+        if: steps.existing.outputs.skip == 'false'
+        run: rm -rf -- "$DOCS"
+
+      - name: Download the new snapshot
+        if: steps.existing.outputs.skip == 'false'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: aidlc-docs
+          path: ${{ env.DOCS }}
+
+      - name: Commit and check
+        id: check
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          got=$(sed -n 's/^- Tag: `\(.*\)`$/\1/p' "$DOCS/SOURCE.md")
+          [[ "$got" == "$NEW" ]] || { echo "::error::Snapshot is not $NEW"; exit 1; }
+          if [[ -n "$(git status --porcelain -- . ":(exclude)$DOCS")" ]]; then
+            echo "::error::Files outside the docs snapshot changed"; git status --short; exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add -A -- "$DOCS"
+          git commit -q -m "Refresh bundled AI-DLC docs: $OLD -> $NEW"
+          git diff --stat HEAD~1 HEAD > "$RUNNER_TEMP/diffstat.txt"
+
+          status=0
+          python3 tools/check-skill.py > "$RUNNER_TEMP/check.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/check.log"
+          if [[ $status -ne 0 ]]; then
+            echo "::warning::tools/check-skill.py failed; the pull request says what to fix."
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Push and open the pull request
+        if: steps.existing.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.check.outputs.status }}
+        run: |
+          [[ "$STATUS" =~ ^[0-9]+$ ]] || STATUS=1
+          # Only this workflow's own same-repo refresh PRs count as superseded.
+          superseded=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --author "app/github-actions" \
+            --limit 100 --json number,headRefName,isCrossRepository \
+            --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | startswith("bot/aidlc-docs-"))) | "#\(.number)"] | join(" ")')
+
+          python3 tools/docs-refresh-pr-body.py --old "$OLD" --check-status "$STATUS" \
+            --check-log "$RUNNER_TEMP/check.log" --diffstat "$RUNNER_TEMP/diffstat.txt" \
+            --superseded "$superseded" > "$RUNNER_TEMP/body.md"
+
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            push origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
+          gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE" --head "$BRANCH" \
+            --title "Bundle AI-DLC $NEW docs" --body-file "$RUNNER_TEMP/body.md"

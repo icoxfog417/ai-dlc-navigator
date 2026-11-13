@@ -260,6 +260,16 @@ explain what a command will do; the user runs it.
   `python "<this skill's base directory>/scripts/update-aidlc-docs.py"`
   (`py` instead of `python` on Windows). It needs Python 3 and network access,
   takes effect in the next new session, and `--check` only compares versions.
+- **Stale docs reminder.** Once per conversation, before your first answer
+  that relies on details (numbers, defaults, commands), read the
+  `Snapshot taken:` line in `references/aidlc-workflows/SOURCE.md`. If it is
+  more than 60 days before today, say once, in one line, that the bundled docs
+  may be behind AI-DLC's latest release, and give the user the commands to
+  run (don't run them yourself): `gh skill update ai-dlc-navigator` brings a
+  newer skill release, and the refresh command above with `--check` compares
+  the bundled docs with AI-DLC's latest release. Don't repeat it in the same
+  conversation. AI-DLC usually releases every week or two, so if `--check`
+  says they're up to date, the reminder was a false alarm.
 - If neither the summaries nor the bundled docs answer a question, say so
   instead of guessing.
 - Never promise behavior AI-DLC doesn't guarantee. Generative AI can make

@@ -13,6 +13,8 @@ How to edit, test, and publish the skill. To install and use it, see
 │   ├── references/aidlc-workflows/   ← bundled AI-DLC docs snapshot (generated, see SOURCE.md)
 │   └── scripts/update-aidlc-docs.py  ← refreshes the snapshot (also run by users)
 ├── tools/check-skill.py              ← developer checks (not shipped)
+├── tools/docs-refresh-pr-body.py     ← PR text for the weekly docs refresh (not shipped)
+├── .github/workflows/refresh-aidlc-docs.yml ← weekly: new AI-DLC release → docs refresh PR
 └── .claude/skills/ai-dlc-navigator   → ../../skills/ai-dlc-navigator   (local link, git-ignored)
 ```
 
@@ -116,6 +118,55 @@ a published version can't be changed later. `gh skill publish` warns until
 there is a ruleset.
 
 ## Update the bundled AI-DLC docs
+
+### Automatically (weekly pull request)
+
+`.github/workflows/refresh-aidlc-docs.yml` runs every Monday (and on demand from
+the Actions tab, optionally with a tag). When AI-DLC has a release newer than the
+bundled docs, it refreshes the snapshot, runs `tools/check-skill.py`, and opens a
+pull request from `bot/aidlc-docs-<tag>` with excerpts of the new release notes
+and a checklist. It never publishes. To ship it:
+
+1. Push summary edits to the PR branch (steps 1 and 2 below). If the checks
+   failed, a page the skill cites probably moved upstream: fix the citation.
+2. Merge, then publish a **minor** release (see "Publish").
+
+If a newer AI-DLC release comes out while a refresh PR is still open, the
+workflow opens a second PR, which links to the first. Move any edits you pushed
+to the first PR, then close it.
+
+If a run stops with "Branch ... exists without a pull request", an earlier run
+was interrupted or someone else created that branch. Check the branch, delete
+it, and run the workflow again.
+
+One-time repo settings:
+
+- **Settings → Actions → General → Workflow permissions → "Allow GitHub Actions
+  to create and approve pull requests"**. This also lets workflow tokens
+  approve PRs, so keep the safeguards below.
+- **Settings → Rules → Rulesets**: protect `main` (require a pull request) and
+  `v*` tags (no updates or deletions). The workflow's token can write
+  contents, and rulesets stop it, or a compromised step, from pushing to
+  `main` or moving a release tag.
+
+GitHub turns off scheduled workflows in a repo with no activity for 60 days.
+If that happens, turn it back on from the Actions tab.
+
+Security rules for this workflow (also in the file's header comment):
+
+- Never add a `pull_request_target` trigger, and never run code from a PR with
+  its write token. Today it runs only on schedule or manual dispatch, so fork
+  PRs can't start it.
+- Upstream content is untrusted. It is downloaded and parsed in the read-only
+  `fetch` job, and the update script refuses unsafe paths, agent instruction
+  files (`CLAUDE.md`) and hidden files, and caps sizes. The write token is
+  given only to the push and PR steps.
+- Pin actions by commit SHA. When updating one, look up the SHA of the
+  release tag (`gh api repos/actions/checkout/commits/v7.0.1 --jq .sha`).
+- The bundled docs are read by the navigator as instructions, so review
+  each refresh diff for text aimed at an agent (the PR checklist asks for this).
+
+### By hand
 
 ```bash
 python3 skills/ai-dlc-navigator/scripts/update-aidlc-docs.py --check   # bundled vs latest

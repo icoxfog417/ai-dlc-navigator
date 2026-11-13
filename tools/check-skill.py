@@ -49,9 +49,10 @@ def check_skill(skill):
         fail(f"{rel}/SKILL.md: gh install metadata in frontmatter (run: gh skill publish --fix)")
 
     docs = skill / "references" / "aidlc-workflows"
-    for bad in ("CLAUDE.md", ".git"):
-        if any(docs.rglob(bad)):
-            fail(f"{rel}: bundled docs contain {bad}")
+    # Agent instruction files and hidden folders must never be bundled (any case, any depth).
+    for p in docs.rglob("*"):
+        if p.name.lower() in ("claude.md", "claude.local.md") or p.name.startswith("."):
+            fail(f"{rel}: bundled docs contain {p.relative_to(docs)}")
     missing = set()
     for md in [skill / "SKILL.md", *sorted((skill / "references").glob("*.md"))]:
         for cite in CITE_RE.findall(md.read_text(encoding="utf-8")):
@@ -78,7 +79,9 @@ def main():
     if shutil.which("gh"):
         r = subprocess.run(["gh", "skill", "publish", "--dry-run"], cwd=ROOT, capture_output=True, text=True)
         out = (r.stdout + r.stderr).strip()
-        if r.returncode != 0:
+        if r.returncode != 0 and 'unknown command "skill"' in out:
+            print("skip  this gh has no `gh skill` (needs 2.100+): run `gh skill publish --dry-run` yourself")
+        elif r.returncode != 0:
             fail("gh skill publish --dry-run:\n" + out)
         else:
             print("ok    gh skill publish --dry-run" + "".join(f"\n      {l}" for l in out.splitlines() if l.startswith("warning")))
