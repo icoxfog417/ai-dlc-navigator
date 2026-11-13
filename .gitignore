@@ -1,5 +1,7 @@
-# This repo holds the aidlc-navigator skill (skills/). AI-DLC trial runs in this
-# folder stay local: `aidlc config` owns these paths and may rewrite them.
+# This repo holds the ai-dlc-navigator skill (skills/). AI-DLC trial runs in this
+# folder stay local: `aidlc config` manages these paths. The local link
+# .claude/skills/ai-dlc-navigator -> ../../skills/ai-dlc-navigator is ignored too
+# (gh skill publish warns when .claude/skills/ is committed); see README.
 /.claude/
 /aidlc/
 /aidlc.settings.json

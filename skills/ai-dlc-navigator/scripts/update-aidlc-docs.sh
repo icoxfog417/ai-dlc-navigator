@@ -60,7 +60,7 @@ for p in $REMOVE; do rm -rf "$work/new/$p"; done
 {
   echo "# Source of this snapshot"
   echo
-  echo "Plain-file snapshot of the AI-DLC repository, bundled with the aidlc-navigator skill."
+  echo "Plain-file snapshot of the AI-DLC repository, bundled with the ai-dlc-navigator skill."
   echo "Do not edit by hand. Refresh with \`scripts/update-aidlc-docs.sh\` from the skill folder."
   echo
   echo "- Repository: https://github.com/awslabs/aidlc-workflows"

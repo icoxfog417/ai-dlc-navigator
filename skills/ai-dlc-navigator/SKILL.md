@@ -1,5 +1,5 @@
 ---
-name: aidlc-navigator
+name: ai-dlc-navigator
 license: MIT-0
 description: Onboarding navigator for first-time AI-DLC (AI-Driven Development Life Cycle, awslabs/aidlc-workflows) users, in the user's own language (Japanese, English, or any other). Use when someone asks what AI-DLC is, why it works the way it does, how to install or start it, how to run their first /aidlc workflow, which workflow profile (scope) to pick, or which settings to choose (harness, model provider, effort preset, MCP, plugins, depth, test strategy, Guard Policy, ceremony switches). Also use when a newcomer is confused by approval gates or feels "stuck". Triggers include "AI-DLC とは", "AI-DLC の使い方", "AI-DLC の設定", "aidlc を始めたい", "what is AI-DLC", "how do I set up aidlc", "which scope should I use".
 ---
@@ -111,10 +111,12 @@ newcomers.
   - The folder is a production repo and the user is still learning: suggest a
     separate practice project of their choosing.
   - The user names a different folder. Follow them.
-- If this skill is installed in the project itself (`<project>/.claude/skills/aidlc-navigator`),
-  warn once: `aidlc config` manages `.claude/` and can overwrite it. Recommend
-  the user-level install instead:
-  `gh skill install icoxfog417/aidlc-navigator aidlc-navigator --agent claude-code --scope user`.
+- If this skill is installed in the project itself (`<project>/.claude/skills/ai-dlc-navigator`)
+  and the user wants to reset or remove AI-DLC there, warn once that deleting
+  the whole `.claude/` folder deletes this skill too. `aidlc config` itself
+  keeps it. Point them to AI-DLC's manifest-based removal
+  (`R/docs/guide/18-install-and-lifecycle.md`, "Remove AI-DLC from a Project"),
+  which keeps files AI-DLC didn't install.
 - Never create, move, or delete folders for the user.
 
 A message often carries several needs at once ("what is it, why the gates,
