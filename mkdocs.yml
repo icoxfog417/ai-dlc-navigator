@@ -1,0 +1,60 @@
+# GitHub Pages site: the tutorial plus a short introduction to the skill.
+# Build locally: see DEVELOPMENT.md, "Site". Published by .github/workflows/pages.yml.
+site_name: ai-dlc-navigator
+site_description: AI-DLC を初めて使う人のための Agent Skill とチュートリアル
+site_url: https://icoxfog417.github.io/ai-dlc-navigator/
+repo_url: https://github.com/icoxfog417/ai-dlc-navigator
+repo_name: icoxfog417/ai-dlc-navigator
+edit_uri: edit/main/docs/
+copyright: MIT-0
+
+docs_dir: docs
+strict: true
+
+nav:
+  - ホーム: index.md
+  - チュートリアル: tutorial.md
+
+theme:
+  name: material
+  language: ja
+  features:
+    - content.code.copy
+    - navigation.top
+    - toc.follow
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: ダークモードに切り替え
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: ライトモードに切り替え
+
+plugins:
+  - search:
+      lang: ja
+
+hooks:
+  - tools/mkdocs_hooks.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: true

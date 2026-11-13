@@ -15,6 +15,9 @@ How to edit, test, and publish the skill. To install and use it, see
 ├── tools/check-skill.py              ← developer checks (not shipped)
 ├── tools/docs-refresh-pr-body.py     ← PR text for the weekly docs refresh (not shipped)
 ├── .github/workflows/refresh-aidlc-docs.yml ← weekly: new AI-DLC release → docs refresh PR
+├── docs/                         ← GitHub Pages site source (Japanese tutorial + intro; not shipped)
+├── mkdocs.yml, requirements-docs.{in,txt}, tools/mkdocs_hooks.py ← site build (not shipped)
+├── .github/workflows/pages.yml   ← builds the site on PRs; publishes it from main
 └── .claude/skills/ai-dlc-navigator   → ../../skills/ai-dlc-navigator   (local link, git-ignored)
 ```
 
@@ -116,6 +119,32 @@ this skill.
 Recommended once: protect release tags (repo Settings → Rules → Rulesets), so
 a published version can't be changed later. `gh skill publish` warns until
 there is a ruleset.
+
+## Site
+
+`docs/` is the source of <https://icoxfog417.github.io/ai-dlc-navigator/>,
+built with MkDocs Material. Pages are written to read well on GitHub too:
+
+- Trial-run notes go between `<!-- trial -->` and `<!-- /trial -->` (each on
+  its own line). They stay in the Markdown and are left out of the site.
+- Use GitHub alerts (`> [!NOTE]`, `> [!TIP]`, `> [!WARNING]`). A bold first
+  line (`> **Title**`) becomes the box title on the site.
+
+Both are done by `tools/mkdocs_hooks.py`. Preview locally:
+
+```bash
+python3 -m venv .venv-docs
+.venv-docs/bin/pip install --require-hashes --no-deps -r requirements-docs.txt
+NO_MKDOCS_2_WARNING=1 .venv-docs/bin/mkdocs serve   # http://127.0.0.1:8000
+```
+
+`.github/workflows/pages.yml` builds with `--strict` on every pull request that
+touches the site and publishes from `main` (Settings → Pages → Source:
+**GitHub Actions**). To change MkDocs versions, edit `requirements-docs.in` and
+regenerate `requirements-docs.txt` with
+`pip-compile --generate-hashes --strip-extras requirements-docs.in`.
+Material for MkDocs reaches end of life on 2027-05-05; its successor Zensical
+reads `mkdocs.yml`.
 
 ## Update the bundled AI-DLC docs
 

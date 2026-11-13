@@ -20,3 +20,7 @@
 skills/*/references/.update.*
 __pycache__/
 *.pyc
+
+# Site build output and local venv (mkdocs.yml)
+/site/
+/.venv-docs/

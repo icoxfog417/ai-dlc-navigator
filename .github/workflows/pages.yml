@@ -1,0 +1,81 @@
+# Builds the site in docs/ with MkDocs Material and publishes it to GitHub Pages
+# (Settings > Pages > Source: GitHub Actions). See DEVELOPMENT.md, "Site".
+#
+# Security notes (keep these true when editing):
+# - Pull requests only build (read-only token); nothing is deployed from a PR.
+#   Never switch the trigger to pull_request_target.
+# - Python packages are installed from requirements-docs.txt with --require-hashes.
+# - No ${{ }} expression is placed inside a run: script.
+# - Only the deploy job gets pages/id-token write, and it runs no repo code.
+name: Publish site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - requirements-docs.txt
+      - tools/mkdocs_hooks.py
+      - .github/workflows/pages.yml
+  pull_request:
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - requirements-docs.txt
+      - tools/mkdocs_hooks.py
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site (read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install MkDocs (hash-pinned)
+        run: python -m pip install --require-hashes --no-deps -r requirements-docs.txt
+
+      - name: Build
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+        run: python -m mkdocs build --strict
+
+      - name: Upload site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
