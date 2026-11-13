@@ -138,8 +138,11 @@ the trial notes would be published. Preview locally from the repo root:
 ```bash
 python3 -m venv .venv-docs
 .venv-docs/bin/pip install --require-hashes --no-deps -r requirements-docs.txt
-.venv-docs/bin/zensical serve   # http://localhost:8000
+.venv-docs/bin/python -m zensical serve   # http://localhost:8000
 ```
+
+Run it as `python -m zensical`, not the `zensical` command: only `python -m`
+puts the repo root on the import path, so `tools.site_markdown` can load.
 
 `.github/workflows/pages.yml` builds with `--strict` on every pull request that
 touches the site, fails if a trial marker reaches the built HTML, and publishes
