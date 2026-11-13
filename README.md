@@ -50,6 +50,12 @@ gh skill update ai-dlc-navigator
 If you installed with `--pin`, the update skips it. Add `--unpin` to follow
 new releases again.
 
+This repo checks for new AI-DLC releases every week and bundles their docs in
+a new skill release after review. The installed skill doesn't update itself,
+so run `gh skill update` every few weeks. If
+the bundled docs are more than 60 days old, the navigator reminds you once per
+conversation.
+
 **Only the bundled AI-DLC docs**, when AI-DLC has released a newer version than
 the one bundled (Python 3, standard library only):
 
