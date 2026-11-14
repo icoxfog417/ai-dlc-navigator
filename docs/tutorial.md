@@ -1,44 +1,37 @@
-# 判断が学習され、検証になるまで（45 分）
+# AI-DLC v2 の中核を学ぶ : 判断をルールとして蓄積し、検証に生かす（45 分）
 
-AI-DLC v2 の中心にある考え方を、小さな CLI を 1 つ作りながら体験するチュートリアルです。
+AI-DLC v2 の中心となる考え方を、簡単な割り勘計算を行う CLI アプリケーションの作成を通じて体験します。
 
 > [!NOTE]
 > **所要時間**
 >
-> 45 分（本編 約 35 分 + 続き 約 10 分）。準備の時間は含みません。
-> AI-DLC 2.11.4 と Claude Code で確認しています。
-
-<!-- trial -->
-> 状態: **試走用ドラフト（試走 1 回目を反映済み）**。trial の目印（HTML コメント）で囲んだ部分は試走用のメモで、GitHub Pages のサイトには出ません。
-<!-- /trial -->
+> 約 45 分です（準備の時間は含みません）。手順ごとの目安は「[題材と時間配分](#題材と時間配分)」を参照してください。
+> AI-DLC 2.11.4 と Claude Code で動作を確認しています。
 
 ## このチュートリアルで体験すること
 
-人が下した**判断**が、次のように育っていきます。
+人間（判断者）が下した**判断**を、次の流れでルールとして蓄積し、検証に生かします。
 
-1. reviewer の指摘を見て、人が直す（判断）
-2. 直した内容が `memory/project.md` のルールになる（学習）
-3. ルールをテンプレートに格上げすると、sensor が決定的に確かめる（検証）
-4. 次の作業ではルールが最初から守られ、reviewer は中身に集中できる
+1. 判断: reviewer の指摘を受けて、判断者が AI エージェントに修正を指示する
+2. 学習: 指示した内容が、`memory/project.md` にルールとして保存される
+3. 検証: 判断者がルールを要件書のテンプレートとして配置すると、sensor が LLM を使わないプログラムで、要件書がルールに沿っているかを検査する
+4. 次の作業: AI エージェントが最初からルールに従って成果物を作成するため、reviewer は内容の確認に集中できる
 
-そして、そのすべてが `audit/` に記録として残ります。途中で、**間違った判断に気づいて stage を戻る**ことも体験します。
+これらの経過は、すべて `audit/` に記録されます。また途中で、**誤った判断に気づいて前の stage に戻る**操作も体験します。
 
-```text
-人の判断 ─▶ memory（約束） ─▶ agent が最初から守る
-    │            └─(人が格上げ)─▶ templates ─▶ sensor が確かめる
-    └──────────── すべて audit に残る
-```
+### 用語
 
-### 用語の言い分け
-
-AI-DLC では同じ `advisory` という言葉が 2 か所で別の意味に使われます。このチュートリアルでは次のように言い分けます。
+このチュートリアルで使う言葉を、次のように定義します。人間である判断者と、AI-DLC の reviewer は区別して記載します。また `advisory` という語は、AI-DLC の 2 か所で異なる意味に使われます。
 
 | 言葉 | 意味 |
 |---|---|
-| review の強さ `advisory` / `adversarial` | reviewer（LLM）が 1 回だけ見るか、反論と修正を何周も繰り返すか |
-| sensor の扱い `advisory` / `blocking` | 決定的なチェックの結果を伝えるだけか、ゲートを止めるか |
-| memory | 守るもの（ルール・書式）。やり取りから学習され、手でも編集できる |
-| knowledge | 参考にする資料。ファイルを持ち込む（今回は使わない） |
+| 判断者 | このチュートリアルを進める人間。reviewer の指摘を受けて AI エージェントに修正を指示し、承認ゲートで承認するかどうかを決める |
+| reviewer | AI-DLC の中で成果物を確認し、指摘を返す LLM エージェント（product lead、architecture reviewer など）。人間ではない |
+| review の強さ `advisory` / `adversarial` | reviewer の確認を 1 回で終えるか、AI エージェントによる修正と reviewer の再確認を繰り返すか |
+| sensor の扱い `advisory` / `blocking` | LLM を使わないプログラムによるチェックの結果を通知するだけか、不合格のときに承認ゲートで先に進めないようにするか |
+| intent | AI-DLC で 1 つの依頼に対応する作業の単位。手順 1 で 1 つ目、手順 5 で 2 つ目の intent を開始する |
+| memory | 従うべきルールや書式。やり取りから学習されるほか、手動でも編集できる |
+| knowledge | 参考資料。ファイルを取り込んで使う（今回は使わない） |
 
 ### 題材と時間配分
 
@@ -46,23 +39,37 @@ AI-DLC では同じ `advisory` という言葉が 2 か所で別の意味に使�
 
 | パート | 内容 | 目安 |
 |---|---|---|
-| 本編 | 手順 1〜5（判断・学習・戻る・audit） | 約 35 分 |
-| 続き | 手順 6（格上げと 2 本目の intent） | 約 10 分 |
+| 手順 1〜4 | 判断・学習・Requirements Analysis への戻り・audit の確認 | 約 35 分 |
+| 手順 5 | ルールのテンプレート化と、2 つ目の intent での確認 | 約 10 分 |
 | 合計 | | **45 分** |
 
 ---
 
-## 0. 準備（45 分の外。事前に済ませる）
+## 0. AI-DLC の準備（※所要時間外）
 
-### 必要なもの
+**必要なツール**
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)
 - AI-DLC（`aidlc` コマンド）。インストール方法は [AI-DLC の公式ドキュメント](https://github.com/awslabs/aidlc-workflows) を参照してください
 - Node.js と git
 
-### 練習用のプロジェクトを作る
+> [!TIP]
+> **ai-dlc-navigator を補助として使う**
+>
+> [ai-dlc-navigator](index.md) は、AI-DLC を初めて使う人を案内する Agent Skill です。必須ではありませんが、インストールしておくと、セットアップで迷ったときや、チュートリアルの途中で承認ゲートや sensor の意味が分からないときに、Claude Code の会話で質問できます。
+>
+> ```bash
+> gh skill install icoxfog417/ai-dlc-navigator ai-dlc-navigator --agent claude-code --scope user
+> ```
+>
+> 質問の例: `/ai-dlc-navigator aidlc doctor の警告の意味を教えて`
+>
+> navigator は説明だけを行います。stage を進める操作や承認ゲートでの回答は、判断者が行います。
 
-ターミナル（Claude Code の外）で、空のフォルダを作って AI-DLC をセットアップします。
+**練習用のプロジェクトを作成する**
+
+ターミナル（Claude Code の外）で空のフォルダを作成し、AI-DLC をセットアップします。
+※ `--harness` の値は、使用する AI Coding Agent によって異なります
 
 ```bash
 mkdir ~/aidlc-playground && cd ~/aidlc-playground
@@ -72,23 +79,19 @@ aidlc doctor
 git add -A && git commit -m "tutorial baseline" && git tag tutorial-baseline
 ```
 
-最後の行で、今の状態を `tutorial-baseline` という基準点として残しています。[リセット](#リセットもう一度最初から) のときに、この基準点まで戻せます。
+最後の行では、現在の状態を commit し、その commit に `tutorial-baseline` というタグを付けています。[リセット](#リセットもう一度最初から) の際は、この commit まで戻せます。
 
 > [!TIP]
 > **doctor の警告について**
 >
-> - 「Project runtime stamp」の警告が出たら、マシン側の AI-DLC が更新されてプロジェクトとバージョンがずれています。`aidlc config --harness claude` をもう一度実行して揃えてから、基準点をコミットしてください
+> - 「Project runtime stamp」の警告が出た場合は、マシンにインストールされた AI-DLC が更新され、プロジェクト側とバージョンが一致していません。`aidlc config --harness claude` を再実行してバージョンを揃えてから、最後の行（commit とタグ付け）を実行してください
 > - 「hooks have not run」と「uncommitted change(s)」の警告は、この時点では正常です
 
-終わったら、**このフォルダで新しい Claude Code の会話を始めてください**。`/aidlc` と hook は、会話の開始時に読み込まれます。
-
-<!-- trial -->
-試走メモ: 試走前の dry-run は `create=351 conflict=0`（既存ファイルの上書きなし）。
-<!-- /trial -->
+完了したら、**このフォルダで新しい Claude Code の会話を開始してください**。`/aidlc` と hook は、会話の開始時に読み込まれます。
 
 ---
 
-## 1. 開始（約 1 分）
+## 1. AI-DLC の開始 : scope を指定（約 1 分）
 
 Claude Code で次のように入力します。
 
@@ -96,115 +99,127 @@ Claude Code で次のように入力します。
 /aidlc express --review advisory --learnings on --sensors on 割り勘CLIをTypeScriptで作りたい。合計金額と人数を渡すと1人あたりの金額を出す。デプロイや監視は不要
 ```
 
-- `express` は一番軽い進め方（scope）です。既定では reviewer・sensors・learnings がすべて off なので、フラグで 3 つとも on にします
-- `--review advisory` は、reviewer に 1 回だけ見てもらい、指摘を並べてもらう設定です。時間内に収めるため、何周も繰り返す `adversarial` にはしません
-- 「デプロイや監視は不要」と最初に伝えておきます。言わないと、Build and Test の途中で deploy 系の stage を外すかどうか聞かれ、数分かかります
-- 新しいプロジェクトなので、既存コードの解析（Reverse Engineering）はスキップされます
+- `express` は最も簡素な進め方（scope）です。既定では reviewer・sensor・learnings がすべて off のため、`--review`・`--sensors`・`--learnings` の 3 つのフラグで on にします
+- `--review advisory` で、reviewer の確認を 1 回にします。所要時間内に収めるため、`adversarial` は使いません
+- 最初に「デプロイや監視は不要」と伝えておきます。伝えない場合、Build and Test の途中でデプロイ関連の stage を外すかどうかを確認され、そのやり取りに数分かかります
 
 <!-- trial -->
 確認:
 - [x] 4 つのフラグを 1 行で受け付けた（`aidlc-state.md` に Review Override = advisory、Sensors / Learnings = on (set by you)）
-- [ ] 「デプロイや監視は不要」で、最初から deploy 系が plan から外れるか（試走 1 回目は言わなかったため、Build and Test で外すやり取りに 4〜5 分かかった）
+- [ ] 「デプロイや監視は不要」と伝えると、最初からデプロイ関連の stage が plan から除外されるか（試走 1 回目は伝えなかったため、Build and Test で除外するやり取りに 4〜5 分かかった）
 <!-- /trial -->
+
+`express` では、次の stage が順に実行されます。詳細は [Stage-by-Scope Matrix](https://awslabs.github.io/aidlc-workflows/guide/05-scopes-and-depth/#stage-by-scope-matrix) を参照してください。
+
+| # | フェーズ | stage | このチュートリアルでの扱い |
+|---|---|---|---|
+| 0.1〜0.3 | Initialization | Workspace Scaffold / Workspace Detection / State Initialization | 手順 1 の入力後に自動で実行され、承認ゲートはない |
+| 2.1 | Inception | Reverse Engineering（既存コードの解析） | 新しいプロジェクトで既存のコードがないため、スキップされる |
+| 2.3 | Inception | Requirements Analysis | 手順 2 と手順 3-1 で実行する |
+| 3.5 | Construction | Code Generation | 手順 3-1 で実行する |
+| 3.6 | Construction | Build and Test | 手順 3-2 で実行する |
+| 4.1 | Operation | Deployment Pipeline | 条件付きの stage。デプロイや監視の作業がない場合はスキップされる |
+| 4.3 | Operation | Deployment Execution | 同上 |
+| 4.4 | Operation | Observability Setup | 同上 |
 
 ---
 
-## 2. Requirements Analysis: 判断と学習（約 9 分）
+## 2. Inception : 要件の判断と学習（約 9 分）
 
-1. 回答方法は **Guide me**（1 問ずつチャットで答える）を選びます
-2. 質問に答えます。**端数の扱いを聞かれたら、わざと「切り捨て」を選んでください**（手順 3 の伏線です）。聞かれなければ、自分から「端数は切り捨てで」と伝えます
-3. 要件書が書かれると、sensor → reviewer（product lead）の順に動きます。reviewer の確認には 3 分ほどかかります
-4. reviewer の指摘（ID 付き）を見て、書式を指示します。
+1. Requirements Analysis が始まると、AI エージェントが要件に関する質問を `requirements-analysis-questions.md` に書き出し、「How would you like to answer them?」と回答方法を尋ねます。**Guide me**（チャットで質問に順に回答する）を選びます
+
+    > [!NOTE]
+    > 回答方法の質問は、1 つの intent につき 1 回だけ、質問のある最初の stage で表示されます。`express` では Requirements Analysis がその stage です。以降の stage では、同じ回答方法が使われます
+
+2. 質問に回答します。**端数の扱いを質問されたら、あえて「切り捨て」を選んでください**（手順 3-1 で、この選択の誤りに気づいて修正します）。質問されなかった場合は、自分から「端数は切り捨てで」と伝えます
+3. AI エージェントが要件書を作成すると、sensor、reviewer（product lead）の順に確認が実行されます。reviewer の確認には 3 分ほどかかります
+4. reviewer の指摘（ID 付き）を確認します。指摘を受けてどのような修正を指示するかは判断者が決めますが、このチュートリアルでは手順をそろえるため、**要件書の書式を指定する**という判断を下します。AI エージェントに次のように指示します。
 
     ```text
     要件書には必ず「## 受け入れ条件」の節を設けて、各 FR の受け入れ条件を Given/When/Then で書いてください
     ```
 
-5. **「Keep that for next time?」**（次回も使うか）と聞かれたら、**Yes, for this project** を選びます
-6. 承認ゲートが開いたら **Approve** します
+5. **「Keep that for next time?」**（次回以降も適用するか）と質問されたら、**Yes, for this project** を選びます
+6. 承認ゲートが表示されたら **Approve** します
 
-学習したルールは `memory/project.md` の `## Corrections` に追記されます。開いて確認してみましょう。
+学習されたルールは、`memory/project.md` の `## Corrections` に追記されます。次のコマンドで確認します。
 
 ```bash
 tail -n 3 aidlc/spaces/default/memory/project.md
 ```
 
-次のような行が入っているはずです。
+次のような行が追加されているはずです。
 
 ```text
 - 要件書（requirements.md）には必ず「## 受け入れ条件」の節を設け、各 FR の受け入れ条件を Given/When/Then で書く。 (learned 2026-11-13) <!-- cid:... -->
 ```
 
 > [!TIP]
-> **見どころ**
->
-> - reviewer は相談相手です。指摘が残っていても、人は承認できます（受け入れたリスクとして記録されます）
-> - 直した内容が、その場限りではなく「次回からのルール」として残ります
+> - reviewer は承認を止めません。指摘が未解決のままでも判断者は承認でき、未解決の指摘は受け入れたリスクとして記録されます。これは `advisory` に限らず、`adversarial` でも同じです（`adversarial` では、承認ゲートの前に修正と再確認が最大 2 回繰り返されます）
+> - 判断者の指示が、その場限りで終わらず、次回以降のルールとして保存されます
 
 > [!NOTE]
-> **「Keep that for next time?」が出なかったら**
+> **「Keep that for next time?」が表示されなかった場合**
 >
-> 「承認。次からは要件書に受け入れ条件の節を必ず入れて」と伝えてください。質問なしでルールとして保存され、保存先が 1 行で表示されます。
+> 「承認。次からは要件書に受け入れ条件の節を必ず入れて」と伝えてください。確認の質問なしでルールとして保存され、保存先が 1 行で表示されます。
 
 <!-- trial -->
 確認:
-- [x] 「Keep that for next time?」が出た（audit では `DECISION_RECORDED`、Question Kind = learnings-note）
-- [x] `project.md` に `(learned 2026-11-13)` 付きの行が入った（`RULE_LEARNED`）
-- [x] 承認ゲートより前に指示したので、差し戻し（`GATE_REJECTED`）は発生しなかった。ゲートで Request Changes を選ぶやり方でも同じように学習されるはず（未確認）
+- [x] 「Keep that for next time?」が表示された（audit では `DECISION_RECORDED`、Question Kind = learnings-note）
+- [x] `project.md` に `(learned 2026-11-13)` 付きの行が追加された（`RULE_LEARNED`）
+- [x] 承認ゲートより前に指示したため、差し戻し（`GATE_REJECTED`）は発生しなかった。ゲートで Request Changes を選ぶ方法でも同様に学習されるはず（未確認）
 <!-- /trial -->
 
 ---
 
-## 3. Code Generation: stage を戻る（約 20 分）
+## 3. Construction（約 22 分）
 
-1. Approve すると、Construction の Code Generation に進みます。`express` ではコードの計画（plan）を承認する手順が省かれていて、計画が 1 行表示されたらすぐにコード生成が始まります
-2. **その 1 行か要件書を見て、「切り捨てだと合計が合わない」と気づいたら、すぐに戻ります**（3000 円 ÷ 7 人 = 428 円で、428 円 × 7 = 2996 円にしかなりません）
+### 3-1. Code Generation : 前の stage に戻る（約 20 分）
+
+1. Requirements Analysis を Approve すると、Construction フェーズの Code Generation に進みます。`express` では Code Generation の plan を承認する手順が省略されており、plan が 1 行表示されると、すぐにコードの生成が始まります
+2. **その 1 行または要件書（`requirements.md`）を見て「切り捨てでは合計額が一致しない」と気づいたら、すぐに Requirements Analysis に戻ります**（3000 円 ÷ 7 人 = 428 円で、428 円 × 7 = 2996 円にとどまります）
 
     ```text
     /aidlc --stage requirements-analysis
     ```
 
-    コード生成が終わるのを待たずに戻ると、1 回分（約 7 分）を節約できます。
+    Code Generation の完了を待たずに戻れば、約 7 分を短縮できます。
 
-3. 既存のファイルをどうするか（Keep / Modify / Redo）聞かれたら **Modify** を選び、「端数は幹事が負担する」に直します
-4. Requirements をもう一度承認すると、Code Generation がやり直しになります。今度は最後まで進め、architecture reviewer の指摘を見てから Approve します（生成と review で約 11 分）
+3. 既存ファイルの扱い（Keep / Modify / Redo）を確認されたら **Modify** を選び、端数の扱いを「端数は幹事が負担する」に変更するよう AI エージェントに指示します
+4. Requirements Analysis を再度 Approve すると、Code Generation が最初から再実行されます。今回は最後まで進め、architecture reviewer の指摘を確認してから Approve します（Code Generation と review で約 11 分）
 
 > [!TIP]
-> **見どころ**
->
-> - 戻ってもファイルは消えません。Keep / Modify / Redo から選べます。工程を戻れるので、ウォーターフォールではありません
-> - 手順 2 で学習したルールは、やり直した Requirements にも最初から効いています
+> - 前の stage に戻っても既存のファイルは削除されず、Keep / Modify / Redo から扱いを選べます。完了した stage に戻ってやり直せる点で、ウォーターフォール型の進め方とは異なります
+> - 手順 2 で学習されたルールは、やり直した Requirements Analysis にも最初から適用されています
 
 <!-- trial -->
 確認:
 - [x] 戻った記録は `STAGE_JUMPED`（`Direction: BACKWARD`。やり直しで無効になった後続の成果物も記録される）
 - [x] Modify を選んだ記録は `ARTIFACT_REUSED`（Decision: modify）
-- 試走 1 回目はコード生成の開始 3 分で戻った
+- 試走 1 回目は、Code Generation の開始から 3 分で戻った
 <!-- /trial -->
 
----
+### 3-2. Build and Test : intent の完了（約 2 分）
 
-## 4. Build and Test → 完了（約 2 分）
-
-テストが実行されます。結果を見て Approve すると、この作業（intent）は完了です。
+Build and Test では、テストが実行されます。結果を確認して Approve すると、この intent は完了です。
 
 ---
 
-## 5. audit で履歴を見る（約 3 分）
+## 4. 完了後 : audit で履歴を確認する（約 3 分）
 
-ここまでのやり取りが、どう記録されたかを見ます。まず Claude Code で次を入力します。
+ここまでのやり取りがどのように記録されたかを確認します。まず Claude Code で次のように入力します。
 
 ```text
 /aidlc --status
 /aidlc-replay
 ```
 
-続けてターミナルで、記録そのもの（audit）を確認します。
+続けてターミナルで、audit のファイルを直接確認します。
 
 ```bash
-# どんなイベントが何回あったか
+# どのイベントが何回記録されたか
 grep -h '^\*\*Event\*\*' aidlc/spaces/default/intents/*/audit/*.md | sort | uniq -c | sort -rn
-# 学習・戻る・Modify の記録
+# ルールの学習・Requirements Analysis への戻り・Modify の記録
 grep -n -A8 'RULE_LEARNED\|STAGE_JUMPED\|ARTIFACT_REUSED' aidlc/spaces/default/intents/*/audit/*.md
 # sensor がどの stage で何回合格したか
 grep -h -A6 'SENSOR_PASSED' aidlc/spaces/default/intents/*/audit/*.md | grep -E 'Sensor ID|Stage slug' | paste - - | sort | uniq -c
@@ -214,103 +229,105 @@ grep -h -A6 'SENSOR_PASSED' aidlc/spaces/default/intents/*/audit/*.md | grep -E 
 
 | イベント | 意味 |
 |---|---|
-| `DECISION_RECORDED` / `QUESTION_ANSWERED` | 人に聞いた質問と、その答え（「Keep that for next time?」を含む） |
-| `RULE_LEARNED` | ルールを学習した記録（保存先と見出し付き） |
-| `REVIEW_REQUESTED` / `REVIEW_COMPLETED` | reviewer に確認を頼んだ / 確認が終わった記録 |
-| `STAGE_JUMPED` | stage を戻った記録 |
-| `ARTIFACT_REUSED` | 戻った先で、既存のファイルを Keep / Modify した記録 |
-| `SENSOR_FIRED` / `SENSOR_PASSED` / `SENSOR_FAILED` | sensor が動いた / 合格 / 不合格 |
+| `DECISION_RECORDED` / `QUESTION_ANSWERED` | AI エージェントが判断者に尋ねた質問と、その回答（「Keep that for next time?」を含む） |
+| `RULE_LEARNED` | ルールが学習された記録（保存先と見出し付き） |
+| `REVIEW_REQUESTED` / `REVIEW_COMPLETED` | reviewer に確認を依頼した / 確認が完了した記録 |
+| `STAGE_JUMPED` | 前の stage に戻った記録 |
+| `ARTIFACT_REUSED` | 戻った先の stage で、既存ファイルを Keep / Modify した記録 |
+| `SENSOR_FIRED` / `SENSOR_PASSED` / `SENSOR_FAILED` | sensor の実行 / 合格 / 不合格 |
 | `GATE_APPROVED` / `GATE_REJECTED` | 承認 / 差し戻し |
-| `RECOMPOSED` | plan から stage を外した / 足した記録 |
-| `CHANGE_ACCEPTED` | review の後にファイルが変わったことを検知し、そのまま進めた記録 |
+| `RECOMPOSED` | plan から stage を除外した / 追加した記録 |
+| `CHANGE_ACCEPTED` | review 後のファイル変更を検知したうえで、そのまま進めた記録 |
 
 > [!NOTE]
-> **sensor は「見えない」のが普通です**
+> **合格した sensor の結果は表示されません**
 >
-> 合格した結果は、ゲートでは報告されません。報告されるのは、指摘が残っている場合だけです。sensor が動いたことは audit で確かめます（`required-sections` / `upstream-coverage` / `traceability` が何十回も動いているはずです）。
+> sensor の結果が承認ゲートで報告されるのは、指摘が残っている場合だけです。sensor が実行されたことは audit で確認します（`required-sections` / `upstream-coverage` / `traceability` が数十回実行されているはずです）。
 
 > [!NOTE]
 > **設定変更の記録について**
 >
-> 手順 1 のように開始時にフラグで設定した場合、設定変更のイベント（`CEREMONY_SET` / `REVIEW_CLASS_CHANGED`）は出ません。設定は `aidlc-state.md` に `set by you` として残ります。
+> 手順 1 のように開始時にフラグで設定した場合、設定変更のイベント（`CEREMONY_SET` / `REVIEW_CLASS_CHANGED`）は記録されません。設定は `aidlc-state.md` に `set by you` として記録されます。
 
 <!-- trial -->
-試走 1 回目: sensor は 26 回動いて 26 回とも合格。`CHANGE_ACCEPTED` は `.gitignore`（コード生成が `node_modules/` と `dist/` を追記した）。
+試走 1 回目: sensor は 26 回実行され、26 回とも合格。`CHANGE_ACCEPTED` の対象は `.gitignore`（Code Generation で `node_modules/` と `dist/` が追記された）。
 <!-- /trial -->
 
 ---
 
-## 6. 学習を検証に格上げし、次の作業で確かめる（続き: 約 10 分）
+## 5. Inception（2 つ目の intent） : ルールのテンプレート化と効果の確認（約 10 分）
 
 > [!WARNING]
 > **この手順はまだ検証中です**
 >
-> 手順 6-2 は試走で確認できていません。結果が説明と違ったら、[Issue](https://github.com/icoxfog417/ai-dlc-navigator/issues) で教えてください。
+> 手順 5-2 は、実際に動かして確認できていません。結果が説明と異なる場合は、[Issue](https://github.com/icoxfog417/ai-dlc-navigator/issues) でお知らせください。
 
-### 6-1. ルールをテンプレートにする
+### 5-1. ルールをテンプレートにする
 
-手順 2 のルール（受け入れ条件の節）を、`memory/templates/` に要件書のテンプレートとして置きます。こうすると、AI-DLC に同梱されている `required-sections` という sensor が、要件書の見出しが揃っているかを決定的にチェックするようになります。自分で sensor を作る必要はありません。
+手順 2 で学習されたルール（受け入れ条件の節）を、要件書のテンプレートとして `memory/templates/` に配置します。これにより、AI-DLC に同梱されている `required-sections` という sensor が、要件書に必要な見出しがそろっているかを、LLM を使わないプログラムで検査するようになります。sensor を自作する必要はありません。
 
-ルールをチェックに格上げするかどうかも、人が判断します。Claude Code で次のように頼みます。
+ルールを sensor の検査対象にするかどうかも、判断者が決めます。Claude Code で次のように依頼します。
 
 ```text
-memory/project.md の「受け入れ条件」のルールを、要件書のテンプレートとして aidlc/spaces/default/memory/templates/ に置いてください。見出しは今回の要件書に合わせて
+memory/project.md の「受け入れ条件」のルールを、要件書のテンプレートとして aidlc/spaces/default/memory/templates/ に置いてください。見出しは今回の要件書に合わせてください
 ```
 
-`aidlc/spaces/default/memory/templates/requirements.md` が作られます。ファイル名は成果物の `requirements.md` と同じです。
+`aidlc/spaces/default/memory/templates/requirements.md` が作成されます。ファイル名は成果物の `requirements.md` と同じです。
 
-### 6-2. 2 本目の intent で確かめる
+### 5-2. 2 つ目の intent で効果を確認する
+
+Claude Code で、2 つ目の intent を開始します。
 
 ```text
 /aidlc express --review advisory --learnings on --sensors on 割り勘CLIに、人ごとに重みを付ける傾斜配分を追加したい。デプロイや監視は不要
 ```
 
-Requirements Analysis の承認ゲートまで進めて、次の 3 つを見ます。
+Requirements Analysis の承認ゲートまで進め、次の 3 点を確認します。
 
-1. 何も言わなくても `## 受け入れ条件` が入っている → **memory（約束）が効いた**
-2. `required-sections` が `SENSOR_PASSED` になっている → **sensor が確かめた**
-3. reviewer の指摘が書式ではなく、中身（重みの扱いなど）に向いている → **形式は機械、中身は reviewer、判断は人**
+1. AI エージェントに指示しなくても、要件書に `## 受け入れ条件` が含まれている → **memory のルールが適用された**
+2. `required-sections` が `SENSOR_PASSED` になっている → **sensor が検査した**
+3. reviewer の指摘が書式ではなく、内容（重みの扱いなど）に集中している → **形式は sensor が、内容は reviewer が確認し、判断者が承認するかどうかを決める**
 
-見終わったら `/aidlc park`（中断）で終えて構いません。
+確認が終わったら、`/aidlc park`（中断）で終了して構いません。
 
 <!-- trial -->
-確認（**最重要。まだ確かめられていない**）:
-- [ ] `required-sections` がテンプレート `requirements.md` を見つけたか（合格の audit 行だけでは分からない場合は、AI-DLC 側で「requirements.md に対して required-sections はどのテンプレートを使った？」と聞く）
-- [ ] 2 本目は既存のコードがあるので、Reverse Engineering が走るか（走ると時間が延びる）
-- [ ] agent がテンプレートを書くときの雛形として使ったか
+確認（**最重要。まだ確認できていない**）:
+- [ ] `required-sections` がテンプレート `requirements.md` を参照したか（合格の audit 行だけでは判別できない場合は、AI-DLC 側で「requirements.md に対して required-sections はどのテンプレートを使った？」と質問する）
+- [ ] 2 つ目の intent では既存のコードがあるため、Reverse Engineering が実行されるか（実行されると所要時間が延びる）
+- [ ] AI エージェントが要件書を作成する際に、テンプレートを雛形として使ったか
 
-アイデア: テンプレートにわざと見出しを 1 つ足しておくと、`SENSOR_FAILED` → agent が自分で直す → `SENSOR_PASSED` の流れが audit に残り、sensor が効いたところを見せられる。
+アイデア: テンプレートにあえて見出しを 1 つ追加しておくと、`SENSOR_FAILED` → AI エージェントが自ら修正 → `SENSOR_PASSED` の流れが audit に記録され、sensor の効果を示せる。
 <!-- /trial -->
 
 ---
 
-## 7. 発展編（チュートリアルの外）
+## 6. 発展編（チュートリアルの外）
 
-- **間違った学習を直す**: `project.md` の学習した行を手で消します。ルールは消えますが、`RULE_LEARNED` は audit に残ります。ルールは人が直せて、記録は消えません
-- **ゲートを止める sensor**: 「金額に浮動小数を使わない」というチェックを自分で sensor として作り（`default_severity: blocking` と `fire_on: gate`）、不合格のときに Fix findings / Override blocking sensors を選ぶ体験をします。learning loop が作る雛形には `fire_on` が書かれず、チェック本体も自分で書く必要がある点に注意してください
+- **誤って学習されたルールを削除する**: `project.md` から該当する行を手動で削除します。ルールは削除されますが、`RULE_LEARNED` の記録は audit に残ります
+- **承認ゲートで先に進めないようにする sensor**: 「金額に浮動小数を使わない」というチェックを sensor として自作し（`default_severity: blocking` と `fire_on: gate`）、不合格時に Fix findings / Override blocking sensors を選ぶ操作を体験します。learning loop が生成する雛形には `fire_on` が含まれず、チェック本体も自分で実装する必要がある点に注意してください
 
 ---
 
 ## リセット（もう一度最初から）
 
-Claude Code を閉じてから、ターミナルで実行します。
+Claude Code を終了してから、ターミナルで次のコマンドを実行します。
 
 ```bash
 cd ~/aidlc-playground
 git reset --hard tutorial-baseline
-git clean -ndx           # 消えるものを先に確認する（何も消さない）
+git clean -ndx           # 削除される対象を事前に確認する（この時点では削除しない）
 git clean -fdx
 aidlc doctor
 ```
 
-- `-x` が必要です。AI-DLC の実行時ファイル（`aidlc/.aidlc-sessions/`、`intents/.aidlc-engine/`、`runtime-graph.json` など）と `node_modules/`・`dist/` は git の管理外なので、`git clean -fd` では残ります
-- `-x` を付けると、どの space を使っているかの記録（`aidlc/active-space`）も消えます。リセット後に `aidlc doctor` で問題がないか確認してください
-- 作業（intent）だけやり直すなら `/aidlc intent archive <name>` でも構いません。ただし、**memory（学習したルールやテンプレート）は intent の外にあるので残ります**
-- 終わったら、新しい Claude Code の会話を始めてください
+- `-x` が必要です。AI-DLC の実行時ファイル（`aidlc/.aidlc-sessions/`、`intents/.aidlc-engine/`、`runtime-graph.json` など）と `node_modules/`・`dist/` は git の管理対象外のため、`git clean -fd` では削除されません
+- `-x` を付けると、使用中の space の記録（`aidlc/active-space`）も削除されます。最後の `aidlc doctor` で、問題がないことを確認してください
+- intent だけをやり直す場合は、`/aidlc intent archive <name>` を使う方法もあります。ただし、memory（学習されたルールやテンプレート）は intent の外に保存されているため、削除されません
+- 完了したら、新しい Claude Code の会話を開始してください
 
 <!-- trial -->
 確認:
-- [ ] `git clean -fdx` の後、doctor と `/aidlc` が普通に動くか（`active-space` は baseline の時点からあったが gitignore 対象なので消える。`default` に戻るだけのはず）
+- [ ] `git clean -fdx` の後、doctor と `/aidlc` が正常に動作するか（`active-space` は `tutorial-baseline` の commit の時点から存在したが、gitignore の対象のため削除される。`default` に戻るだけのはず）
 <!-- /trial -->
 
 <!-- trial -->
@@ -321,11 +338,11 @@ aidlc doctor
 | 手順 | 目安 | 試走 1 回目 | メモ |
 |---|---|---|---|
 | 1. 開始 | 1 分 | 0 分 | 初期化は 1 秒未満 |
-| 2. Requirements | 9 分 | 9 分 | review 約 3 分 |
-| 3. Code Generation + 戻る | 20 分 | 21 分（3 分で戻る + Requirements やり直し 6 分 + 再生成 11 分） | 再生成は生成 6 分 + review 3 分 |
-| 4. Build and Test | 2 分 | 6 分 | うち 4〜5 分は deploy 系を外すやり取り → 手順 1 で先に伝えて短縮 |
-| 5. audit | 3 分 | - | |
-| 小計（1〜5） | 35 分 | 36 分（1〜4 のみ） | |
-| 6. 格上げ + 2 本目 | 10 分 | - | 手順 6-2 は未試走 |
-| 合計（1〜6） | 45 分 | - | |
+| 2. Requirements Analysis | 9 分 | 9 分 | review 約 3 分 |
+| 3-1. Code Generation + 前の stage に戻る | 20 分 | 21 分（3 分で戻る + Requirements Analysis やり直し 6 分 + Code Generation の再実行 11 分） | 再実行はコードの生成 6 分 + review 3 分 |
+| 3-2. Build and Test | 2 分 | 6 分 | うち 4〜5 分はデプロイ関連の stage を除外するやり取り → 手順 1 で先に伝えて短縮 |
+| 4. audit | 3 分 | - | |
+| 小計（1〜4） | 35 分 | 36 分（1〜3 のみ） | |
+| 5. テンプレート化 + 2 つ目の intent | 10 分 | - | 手順 5-2 は未試走 |
+| 合計（1〜5） | 45 分 | - | |
 <!-- /trial -->
