@@ -19,6 +19,29 @@ In a fresh Codex session ask for the AI-DLC commands for this harness — the an
 should name `$aidlc` and `.agents/skills/` without reading `.codex/onboarding.md`;
 `$aidlc --doctor` verifies the readable copy.
 
+### Root instruction overrides
+
+In each directory, Codex checks `AGENTS.override.md` before `AGENTS.md` and
+selects the first existing file (see
+[Codex's file selection](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/agents_md.rs)).
+An empty or whitespace-only override contributes no instructions; it does not
+fall back to `AGENTS.md`. A directory named `AGENTS.override.md` is not selected,
+while a symlink to an instruction file is.
+
+Doctor checks the root file Codex selects and names it when an override takes
+precedence. A missing or changed AI-DLC block produces an advisory warning.
+It also reports damaged blocks in `AGENTS.md` that would stop config or refresh,
+even when Codex loads the override. Doctor does not edit either file.
+
+`AGENTS.override.md` stays yours: AI-DLC never writes it, and config and session
+start keep AI-DLC's block in `AGENTS.md`. Copying that block into the override is
+optional, because Codex gets AI-DLC's own instructions from `.codex/config.toml`
+either way. If you want Codex to read the block too, copy the
+`<!-- BEGIN AI-DLC:agents -->` through `<!-- END AI-DLC:agents -->` block from
+`AGENTS.md` into the override, keeping your own text, and copy it again after an
+update changes it. For a damaged or duplicate block, replace that block and its
+broken marker lines rather than adding another copy.
+
 ## Prerequisites
 
 - **Codex CLI >= 0.145.0** - earlier releases defer compact-source
@@ -27,7 +50,7 @@ should name `$aidlc` and `.agents/skills/` without reading `.codex/onboarding.md
   lack reliable subagent role attribution and hyphenated agent-TOML resolution.
   `/aidlc --doctor` advises on the pin. Check with `codex --version`.
 - **bun** only when generating or running the source/development `dist/`
-  projection. Native installs and versioned release runtimes are
+  projection or the versioned manual-copy runtime. Native installs are
   self-contained.
 - **A Git repository for the target project** — Codex discovers project
   `.codex/hooks.json` only inside one. The native installer and AI-DLC runtime
@@ -61,12 +84,14 @@ codex
 
 The installer verifies the release metadata, executable, and all-harness runtime archive against the published SHA-256 checksums. The installed runtime does not require Bun, Node.js, or Git. Harness selection happens in `aidlc config`.
 
-On Windows, download `install.ps1` and run
+On Windows, download `install.ps1`, allow scripts in that PowerShell window
+with `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force`, and run
 `& $installer`. See [Windows installation](../18-install-and-lifecycle.md#windows-powershell)
 for account scope, automatic User PATH registration, and `-NoModifyPath`.
 For an air-gapped package, use
 `install.sh --from <release-directory> --offline` on Unix or
-`& $installer -From <release-directory> -Offline` on Windows.
+`& $installer -From <release-directory> -Offline` on Windows, after the same
+`Set-ExecutionPolicy` line.
 
 `aidlc config` projects the Codex shell, merges the AI-DLC blocks in `.gitignore`
 and `AGENTS.md`, and writes `.codex/config.toml`, hooks, permission rules, and
@@ -106,7 +131,7 @@ then set `RUNTIME_ROOT` to the extracted `runtime/` directory.
 
    ```bash
    cp -r "$RUNTIME_ROOT/codex/.codex/"  your-project/.codex/
-   cp -r "$RUNTIME_ROOT/codex/.agents/" your-project/.agents/
+   cp -R "$RUNTIME_ROOT/codex/.agents/." your-project/.agents/
    cp -r "$RUNTIME_ROOT/codex/aidlc/"   your-project/aidlc/      # the workspace shell (spaces/default/memory) — a sibling of .codex/, not inside it
    ```
 
@@ -178,7 +203,7 @@ then set `RUNTIME_ROOT` to the extracted `runtime/` directory.
    bun .codex/tools/aidlc-utility.ts doctor
    ```
 
-The versioned runtime uses the native `aidlc` command. Framework developers who
+Framework developers who
 need the Bun-shaped projection can clone the repository, run
 `bun install --frozen-lockfile` and `bun scripts/package.ts`, then use the
 ignored local `dist/codex/` output. The source-checkout trust generator is
@@ -306,4 +331,4 @@ with the neutral chapters:
 - [Scopes, Depth, and Test Strategy](../05-scopes-and-depth.md) — right-sizing a run.
 - [Glossary](../glossary.md) — every term defined.
 
-Other harnesses: [Running AI-DLC on Kiro IDE](kiro-ide.md) · [AI-DLC on Cursor](cursor.md) · [the harness family index](README.md).
+Other harnesses: [Running AI-DLC on Kiro](kiro.md) · [AI-DLC on Cursor](cursor.md) · [the harness family index](README.md).
